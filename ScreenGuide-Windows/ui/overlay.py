@@ -55,3 +55,54 @@ ANNOT_COLORS = {
     "cyan":   QColor(0x4F, 0xD9, 0xFF),
 }
 
+# Progressive stroke animation — shapes draw at "hand speed" (px/sec), so a
+# long line takes visibly longer than a short tick mark. Queued sequentially;
+# the buddy cursor rides the pen tip while each stroke draws.
+STROKE_SPEED_PX_S   = 420.0
+SHAPE_DRAW_MIN_S    = 0.6
+SHAPE_DRAW_MAX_S    = 2.2
+SHAPE_GAP_SECONDS   = 0.28
+
+_TEXT_SIZES = {"s": 12, "m": 17, "l": 26}
+
+
+def _shape_path_pts(shape: dict):
+    """(pts, closed) polyline for stroke-able shapes; None for circle/text."""
+    kind = shape.get("kind")
+    if kind in ("line", "arrow"):
+        return list(shape["pts"]), False
+    if kind == "poly":
+        return list(shape["pts"]), True
+    if kind == "rect":
+        x1, y1, x2, y2 = shape["x1"], shape["y1"], shape["x2"], shape["y2"]
+        return [(x1, y1), (x2, y1), (x2, y2), (x1, y2)], True
+    if kind == "underline":
+        return [(shape["x"], shape["y"]),
+                (shape["x"] + shape["w"], shape["y"])], False
+    if kind == "angle":
+        s = shape.get("s", 22)
+        rot = math.radians(shape.get("rot", 0))
+        x, y = shape["x"], shape["y"]
+        d1 = (math.cos(rot), math.sin(rot))
+        d2 = (math.cos(rot + math.pi / 2), math.sin(rot + math.pi / 2))
+        return [(x + d1[0] * s, y + d1[1] * s),
+                (x + (d1[0] + d2[0]) * s, y + (d1[1] + d2[1]) * s),
+                (x + d2[0] * s, y + d2[1] * s)], False
+    return None, False
+
+
+def _shape_length(shape: dict) -> float:
+    """Approximate stroke length in logical px — drives draw duration."""
+    kind = shape.get("kind")
+    if kind == "circle":
+        return 2 * math.pi * shape.get("r", 30)
+    if kind == "text":
+        return 90.0   # fixed short reveal
+    pts, closed = _shape_path_pts(shape)
+    if not pts or len(pts) < 2:
+        return 60.0
+    if closed:
+        pts = pts + [pts[0]]
+    return sum(math.hypot(b[0] - a[0], b[1] - a[1])
+               for a, b in zip(pts, pts[1:]))
+
