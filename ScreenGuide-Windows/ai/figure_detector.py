@@ -49,3 +49,59 @@ def detect_figures(base64_jpeg: str, max_figures: int = 4) -> List[Figure]:
         log.debug("opencv not installed — figure detection disabled")
         return []
 
+    try:
+        img = Image.open(io.BytesIO(base64.b64decode(base64_jpeg))).convert("L")
+        gray = np.array(img)
+    except Exception as e:
+        log.debug("figure detect decode failed: %s", e)
+        return []
+
+    H, W = gray.shape
+    if W < 100 or H < 100:
+        return []
+
+    edges = cv2.Canny(gray, 40, 120)
+    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=1)
+    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+
+    min_area = W * H * 0.002          # ignore icons / noise
+    max_area = W * H * 0.55           # ignore the window frame itself
+
+    def _norm_pt(px: float, py: float) -> Tuple[int, int]:
+        return (int(round(px / W * 1000)), int(round(py / H * 1000)))
+
+    figs: List[Figure] = []
+    seen: set = set()
+    for c in contours:
+        area = cv2.contourArea(c)
+        if area < min_area or area > max_area:
+            continue
+        peri = cv2.arcLength(c, True)
+        if peri <= 0:
+            continue
+        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+        n = len(approx)
+        x, y, w, h = cv2.boundingRect(c)
+
+        # Dedupe inner/outer edges of the same stroke (Canny doubles lines)
+        key = (x // 15, y // 15, w // 15, h // 15, min(n, 6))
+        if key in seen:
+            continue
+
+        M = cv2.moments(c)
+        if M["m00"] == 0:
+            continue
+        cx, cy = M["m10"] / M["m00"], M["m01"] / M["m00"]
+        circularity = 4 * math.pi * area / (peri * peri)
+
+        if n == 3:
+            kind = "triangle"
+        elif n == 4 and circularity < 0.82:
+            kind = "quad"
+        elif circularity > 0.82:
+            kind, approx = "circle", []
+        elif 5 <= n <= 8:
+            kind = "poly"
+        else:
+            continue
+
