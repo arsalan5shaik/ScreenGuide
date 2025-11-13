@@ -106,3 +106,53 @@ def _shape_length(shape: dict) -> float:
     return sum(math.hypot(b[0] - a[0], b[1] - a[1])
                for a, b in zip(pts, pts[1:]))
 
+
+def _partial_pts(pts, closed, u):
+    """First u-fraction of a polyline. Returns the drawn point list."""
+    if closed and len(pts) >= 3:
+        pts = list(pts) + [pts[0]]
+    if len(pts) < 2:
+        return list(pts)
+    seg_lens = [math.hypot(b[0] - a[0], b[1] - a[1])
+                for a, b in zip(pts, pts[1:])]
+    total = sum(seg_lens)
+    if total <= 0:
+        return [pts[0]]
+    budget = total * min(1.0, max(0.0, u))
+    drawn = [pts[0]]
+    for (a, b), L in zip(zip(pts, pts[1:]), seg_lens):
+        if budget <= 0:
+            break
+        if L <= budget:
+            drawn.append(b)
+            budget -= L
+        else:
+            t = budget / L
+            drawn.append((a[0] + (b[0] - a[0]) * t,
+                          a[1] + (b[1] - a[1]) * t))
+            budget = 0
+    return drawn
+
+
+def _stroke_tip(shape: dict, u: float):
+    """Current pen-tip position of a shape at progress u — where the buddy
+    hovers while 'drawing'. Returns (x, y) in logical screen coords."""
+    kind = shape.get("kind")
+    if kind == "circle":
+        a = math.radians(90 - 360 * u)   # clockwise from 12 o'clock
+        return (shape["x"] + shape["r"] * math.cos(a),
+                shape["y"] - shape["r"] * math.sin(a))
+    if kind == "text":
+        return (shape["x"], shape["y"])
+    pts, closed = _shape_path_pts(shape)
+    if not pts:
+        return None
+    drawn = _partial_pts(pts, closed, u)
+    return drawn[-1] if drawn else None
+
+# Pointing phrases from the original
+POINTER_PHRASES = (
+    "right here!", "this one!", "over here!",
+    "click this!", "here it is!", "found it!",
+)
+
