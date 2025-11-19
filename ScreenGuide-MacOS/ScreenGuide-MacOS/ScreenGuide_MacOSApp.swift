@@ -53,3 +53,37 @@ final class CompanionAppDelegate: NSObject, NSApplicationDelegate {
         // startSparkleUpdater()
     }
 
+    func applicationWillTerminate(_ notification: Notification) {
+        companionManager.stop()
+    }
+
+    /// Registers the app as a login item so it launches automatically on
+    /// startup. Uses SMAppService which shows the app in System Settings >
+    /// General > Login Items, letting the user toggle it off if they want.
+    private func registerAsLoginItemIfNeeded() {
+        let loginItemService = SMAppService.mainApp
+        if loginItemService.status != .enabled {
+            do {
+                try loginItemService.register()
+                print("🎯 ScreenGuide: Registered as login item")
+            } catch {
+                print("⚠️ ScreenGuide: Failed to register as login item: \(error)")
+            }
+        }
+    }
+
+    private func startSparkleUpdater() {
+        let updaterController = SPUStandardUpdaterController(
+            startingUpdater: false,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
+        self.sparkleUpdaterController = updaterController
+
+        do {
+            try updaterController.updater.start()
+        } catch {
+            print("⚠️ ScreenGuide: Sparkle updater failed to start: \(error)")
+        }
+    }
+}
