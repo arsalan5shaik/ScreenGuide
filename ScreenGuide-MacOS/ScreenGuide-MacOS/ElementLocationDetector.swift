@@ -49,3 +49,57 @@ class ElementLocationDetector {
         self.session = URLSession(configuration: config)
     }
 
+    /// Detects the screen location of a UI element the user is asking about.
+    ///
+    /// - Parameters:
+    ///   - screenshotData: JPEG or PNG screenshot data from ScreenCaptureKit
+    ///   - userQuestion: The user's voice transcript (e.g., "How do I add a project?")
+    ///   - displayWidthInPoints: The captured display's width in screen points
+    ///   - displayHeightInPoints: The captured display's height in screen points
+    ///
+    /// - Returns: A `CGPoint` in display-local macOS coordinates (bottom-left origin) if an
+    ///   element was identified, or `nil` if no element was found or detection failed.
+    func detectElementLocation(
+        screenshotData: Data,
+        userQuestion: String,
+        displayWidthInPoints: Int,
+        displayHeightInPoints: Int
+    ) async -> CGPoint? {
+        // Pick the Computer Use resolution that best matches this display's aspect ratio.
+        // This avoids stretching the screenshot (e.g., squishing a 16:10 Mac display
+        // into 4:3), which would distort the image Claude sees and degrade X-axis accuracy.
+        let computerUseResolution = bestComputerUseResolution(
+            forDisplayWidth: displayWidthInPoints,
+            displayHeight: displayHeightInPoints
+        )
+
+        print("🎯 ElementLocationDetector: display is \(displayWidthInPoints)x\(displayHeightInPoints) " +
+              "(ratio \(String(format: "%.3f", Double(displayWidthInPoints) / Double(displayHeightInPoints)))), " +
+              "using Computer Use resolution \(computerUseResolution.width)x\(computerUseResolution.height)")
+
+        // Resize the screenshot to the chosen Computer Use resolution
+        guard let resizedScreenshotData = resizeScreenshotForComputerUse(
+            originalImageData: screenshotData,
+            targetWidth: computerUseResolution.width,
+            targetHeight: computerUseResolution.height
+        ) else {
+            print("⚠️ ElementLocationDetector: failed to resize screenshot")
+            return nil
+        }
+
+        // Make the Computer Use API call with the matching resolution declared
+        guard let computerUseCoordinate = await callComputerUseAPI(
+            resizedScreenshotData: resizedScreenshotData,
+            userQuestion: userQuestion,
+            declaredDisplayWidth: computerUseResolution.width,
+            declaredDisplayHeight: computerUseResolution.height
+        ) else {
+            return nil
+        }
+
+        // Clamp coordinates to the valid range — Claude occasionally returns
+        // values slightly outside the declared display dimensions, which would
+        // map to off-screen positions after scaling.
+        let clampedX = max(0, min(computerUseCoordinate.x, CGFloat(computerUseResolution.width)))
+        let clampedY = max(0, min(computerUseCoordinate.y, CGFloat(computerUseResolution.height)))
+
