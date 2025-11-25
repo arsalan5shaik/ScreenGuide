@@ -48,3 +48,19 @@ def make_frame(size: int) -> Image.Image:
     img.paste(tri, ((size - tri.width) // 2, (size - tri.height) // 2), tri)
     return img
 
+
+def main():
+    sizes = [16, 24, 32, 48, 64, 128, 256]
+    frames = [make_frame(s) for s in sizes]
+    # Pillow writes multi-resolution .ico when sizes= is passed
+    frames[0].save(
+        OUT,
+        format="ICO",
+        sizes=[(s, s) for s in sizes],
+        append_images=frames[1:],
+    )
+    print(f"Wrote {OUT} ({len(sizes)} sizes)")
+
+
+if __name__ == "__main__":
+    main()
