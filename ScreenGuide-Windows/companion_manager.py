@@ -51,3 +51,64 @@ def _ensure_ollama_running():
         except Exception:
             pass
 
+    # API down. If an ollama process already exists, don't spawn a second
+    # `ollama serve` — duplicate instances fight over the port and wedge the
+    # API entirely. Just wait for the existing one below.
+    already_running = False
+    try:
+        out = subprocess.run(
+            ["tasklist", "/FI", "IMAGENAME eq ollama.exe", "/FO", "CSV", "/NH"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+        already_running = "ollama.exe" in out.lower()
+    except Exception:
+        pass
+
+    if not already_running:
+        try:
+            subprocess.Popen(
+                ["ollama", "serve"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+        except FileNotFoundError:
+            return  # ollama not installed, provider will fail gracefully
+
+    # Wait up to 8 s for the server to come up
+    for _ in range(16):
+        time.sleep(0.5)
+        try:
+            urllib.request.urlopen(url, timeout=1)
+            return
+        except Exception:
+            pass
+
+
+def _build_system_prompt(
+    window_title: str = "",
+    lesson_step: int = 0,
+    total_steps: int = 0,
+    quiz_mode: bool = False,
+    detected_coord: Optional[tuple] = None,
+    code_active: bool = False,
+    language_code: str = "en",
+    extra: str = "",
+) -> str:
+    today = datetime.now().strftime("%A, %B %d, %Y")
+    ctx_lines = [f"TODAY'S DATE: {today}."]
+    if window_title:
+        ctx_lines.append(f'ACTIVE WINDOW: "{window_title}"')
+    if detected_coord:
+        x, y, label = detected_coord
+        ctx_lines.append(
+            f"DETECTED ELEMENT (pre-computed by the pointing engine — use "
+            f"this coordinate verbatim in your [POINT] tag): x={x}, y={y}, "
+            f"label='{label}'. (Already normalized 0-1000.)"
+        )
+    if total_steps > 1:
+        ctx_lines.append(
+            f"LESSON PROGRESS: step {lesson_step + 1} of {total_steps}. "
+            "Explain ONLY this step, then end with \"Say 'next' when ready.\""
+        )
+
