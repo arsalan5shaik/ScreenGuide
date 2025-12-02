@@ -48,3 +48,53 @@ enum BuddyTranscriptionProviderFactory {
             .lowercased()
         let preferredProvider = preferredProviderRawValue.flatMap(PreferredProvider.init(rawValue:))
 
+        let assemblyAIProvider = AssemblyAIStreamingTranscriptionProvider()
+        let openAIProvider = OpenAIAudioTranscriptionProvider()
+
+        if preferredProvider == .appleSpeech {
+            return AppleSpeechTranscriptionProvider()
+        }
+
+        if preferredProvider == .assemblyAI {
+            if assemblyAIProvider.isConfigured {
+                return assemblyAIProvider
+            }
+
+            print("⚠️ Transcription: AssemblyAI preferred but not configured, falling back")
+
+            if openAIProvider.isConfigured {
+                print("⚠️ Transcription: using OpenAI as fallback")
+                return openAIProvider
+            }
+
+            print("⚠️ Transcription: using Apple Speech as fallback")
+            return AppleSpeechTranscriptionProvider()
+        }
+
+        if preferredProvider == .openAI {
+            if openAIProvider.isConfigured {
+                return openAIProvider
+            }
+
+            print("⚠️ Transcription: OpenAI preferred but not configured, falling back")
+
+            if assemblyAIProvider.isConfigured {
+                print("⚠️ Transcription: using AssemblyAI as fallback")
+                return assemblyAIProvider
+            }
+
+            print("⚠️ Transcription: using Apple Speech as fallback")
+            return AppleSpeechTranscriptionProvider()
+        }
+
+        if assemblyAIProvider.isConfigured {
+            return assemblyAIProvider
+        }
+
+        if openAIProvider.isConfigured {
+            return openAIProvider
+        }
+
+        return AppleSpeechTranscriptionProvider()
+    }
+}
