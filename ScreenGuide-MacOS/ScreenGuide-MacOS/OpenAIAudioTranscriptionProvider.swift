@@ -56,3 +56,54 @@ final class OpenAIAudioTranscriptionProvider: BuddyTranscriptionProvider {
     }
 }
 
+private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscriptionSession {
+    let finalTranscriptFallbackDelaySeconds: TimeInterval = 8.0
+
+    private struct TranscriptionResponse: Decodable {
+        let text: String
+    }
+
+    private static let transcriptionURL = URL(string: "https://api.openai.com/v1/audio/transcriptions")!
+    private static let targetSampleRate = 16_000
+
+    private let apiKey: String
+    private let modelName: String
+    private let keyterms: [String]
+    private let onTranscriptUpdate: (String) -> Void
+    private let onFinalTranscriptReady: (String) -> Void
+    private let onError: (Error) -> Void
+
+    private let stateQueue = DispatchQueue(label: "com.learningbuddy.openai.transcription")
+    private let audioPCM16Converter = BuddyPCM16AudioConverter(
+        targetSampleRate: Double(targetSampleRate)
+    )
+    private let urlSession: URLSession
+
+    private var bufferedPCM16AudioData = Data()
+    private var hasRequestedFinalTranscript = false
+    private var hasDeliveredFinalTranscript = false
+    private var isCancelled = false
+    private var transcriptionUploadTask: Task<Void, Never>?
+
+    init(
+        apiKey: String,
+        modelName: String,
+        keyterms: [String],
+        onTranscriptUpdate: @escaping (String) -> Void,
+        onFinalTranscriptReady: @escaping (String) -> Void,
+        onError: @escaping (Error) -> Void
+    ) {
+        self.apiKey = apiKey
+        self.modelName = modelName
+        self.keyterms = keyterms
+        self.onTranscriptUpdate = onTranscriptUpdate
+        self.onFinalTranscriptReady = onFinalTranscriptReady
+        self.onError = onError
+
+        let urlSessionConfiguration = URLSessionConfiguration.default
+        urlSessionConfiguration.timeoutIntervalForRequest = 45
+        urlSessionConfiguration.timeoutIntervalForResource = 90
+        urlSessionConfiguration.waitsForConnectivity = true
+        self.urlSession = URLSession(configuration: urlSessionConfiguration)
+    }
+
