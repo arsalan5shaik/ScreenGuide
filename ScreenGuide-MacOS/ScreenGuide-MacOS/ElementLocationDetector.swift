@@ -103,3 +103,62 @@ class ElementLocationDetector {
         let clampedX = max(0, min(computerUseCoordinate.x, CGFloat(computerUseResolution.width)))
         let clampedY = max(0, min(computerUseCoordinate.y, CGFloat(computerUseResolution.height)))
 
+        // Scale coordinates from the Computer Use resolution back to actual display point dimensions
+        let scaledX = (clampedX / CGFloat(computerUseResolution.width)) * CGFloat(displayWidthInPoints)
+        let scaledYTopLeftOrigin = (clampedY / CGFloat(computerUseResolution.height)) * CGFloat(displayHeightInPoints)
+
+        // Convert from top-left origin (Computer Use / CoreGraphics) to bottom-left origin (AppKit)
+        let scaledYBottomLeftOrigin = CGFloat(displayHeightInPoints) - scaledYTopLeftOrigin
+
+        print("🎯 ElementLocationDetector: mapped (\(Int(clampedX)), \(Int(clampedY))) in " +
+              "\(computerUseResolution.width)x\(computerUseResolution.height) → " +
+              "(\(Int(scaledX)), \(Int(scaledYBottomLeftOrigin))) in " +
+              "\(displayWidthInPoints)x\(displayHeightInPoints) display-local AppKit coords")
+
+        return CGPoint(x: scaledX, y: scaledYBottomLeftOrigin)
+    }
+
+    // MARK: - Private Helpers
+
+    /// Picks the Anthropic-recommended Computer Use resolution whose aspect ratio
+    /// is closest to the actual display, minimizing image distortion.
+    private func bestComputerUseResolution(
+        forDisplayWidth displayWidth: Int,
+        displayHeight: Int
+    ) -> (width: Int, height: Int) {
+        let displayAspectRatio = Double(displayWidth) / Double(max(1, displayHeight))
+
+        var bestWidth = 1280
+        var bestHeight = 800
+        var smallestAspectRatioDifference = Double.greatestFiniteMagnitude
+
+        for resolution in Self.supportedComputerUseResolutions {
+            let difference = abs(displayAspectRatio - resolution.aspectRatio)
+            if difference < smallestAspectRatioDifference {
+                smallestAspectRatioDifference = difference
+                bestWidth = resolution.width
+                bestHeight = resolution.height
+            }
+        }
+
+        return (width: bestWidth, height: bestHeight)
+    }
+
+    /// Calls the Claude Computer Use API with a resized screenshot and user question.
+    /// Returns the raw coordinate from Claude's response in the declared resolution space, or nil.
+    private func callComputerUseAPI(
+        resizedScreenshotData: Data,
+        userQuestion: String,
+        declaredDisplayWidth: Int,
+        declaredDisplayHeight: Int
+    ) async -> CGPoint? {
+        var request = URLRequest(url: apiURL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 15
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // The beta header activates Computer Use capabilities and the specialized
+        // pixel-counting training that makes coordinate detection accurate.
+        request.setValue("computer-use-2025-11-24", forHTTPHeaderField: "anthropic-beta")
+
