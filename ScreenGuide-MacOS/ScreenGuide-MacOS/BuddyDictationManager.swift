@@ -51,3 +51,55 @@ enum BuddyPushToTalkShortcut {
             }
         }
 
+        fileprivate var modifierOnlyFlags: NSEvent.ModifierFlags? {
+            switch self {
+            case .shiftFunction:
+                return [.shift, .function]
+            case .controlOption:
+                return [.control, .option]
+            case .shiftControl:
+                return [.shift, .control]
+            case .controlOptionSpace, .shiftControlSpace:
+                return nil
+            }
+        }
+
+        fileprivate var spaceShortcutModifierFlags: NSEvent.ModifierFlags? {
+            switch self {
+            case .shiftFunction:
+                return nil
+            case .controlOption:
+                return nil
+            case .shiftControl:
+                return nil
+            case .controlOptionSpace:
+                return [.control, .option]
+            case .shiftControlSpace:
+                return [.shift, .control]
+            }
+        }
+    }
+
+    enum ShortcutTransition {
+        case none
+        case pressed
+        case released
+    }
+
+    private enum ShortcutEventType {
+        case flagsChanged
+        case keyDown
+        case keyUp
+    }
+
+    static let currentShortcutOption: ShortcutOption = .controlOption
+    static let pushToTalkKeyCode: UInt16 = 49 // Space
+    static let pushToTalkDisplayText = currentShortcutOption.displayText
+    static let pushToTalkTooltipText = "push to talk (\(pushToTalkDisplayText))"
+
+    static func shortcutTransition(
+        for event: NSEvent,
+        wasShortcutPreviouslyPressed: Bool
+    ) -> ShortcutTransition {
+        guard let shortcutEventType = shortcutEventType(for: event.type) else { return .none }
+
