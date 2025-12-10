@@ -63,3 +63,57 @@ RECOMMENDED_VISION: list[OllamaRec] = [
     ),
 ]
 
+
+# ─── Text models (Code Mode, journal Q&A, no-screenshot replies) ──────────────
+
+RECOMMENDED_TEXT: list[OllamaRec] = [
+    OllamaRec(
+        name="qwen2.5-coder:7b",
+        label="Qwen 2.5 Coder 7B",
+        size="4.7 GB",
+        use_for="text",
+        blurb="Best for Code Mode — strong code reasoning",
+    ),
+    OllamaRec(
+        name="llama3.2:3b",
+        label="Llama 3.2 3B",
+        size="2.0 GB",
+        use_for="text",
+        blurb="Fastest text model — great default",
+    ),
+    OllamaRec(
+        name="mistral:7b",
+        label="Mistral 7B",
+        size="4.1 GB",
+        use_for="text",
+        blurb="Reliable general-purpose chat",
+    ),
+    OllamaRec(
+        name="phi3.5",
+        label="Phi 3.5 Mini",
+        size="2.2 GB",
+        use_for="text",
+        blurb="Microsoft's compact reasoner",
+    ),
+]
+
+
+# ─── Vision capability heuristic ──────────────────────────────────────────────
+
+_VISION_KEYWORDS = (
+    "vision", "vl", "llava", "bakllava", "minicpm-v", "moondream",
+    "cogvlm", "internvl", "qwen-vl", "qwen2-vl",
+    "gemma3",   # Gemma 3 is multimodal
+    "pixtral",
+)
+
+
+def is_vision_capable(model_name: str) -> bool:
+    """Best-effort detection of whether an Ollama model supports images.
+
+    Ollama's /api/tags doesn't reliably expose multimodal support, so we
+    fall back to substring matching against well-known vision model names.
+    """
+    n = (model_name or "").lower()
+    return any(kw in n for kw in _VISION_KEYWORDS)
+
