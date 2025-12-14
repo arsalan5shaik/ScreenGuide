@@ -48,3 +48,52 @@ class CollabSession:
     just generates a code and logs that the session would have started.
     """
 
+    SIGNALLING_URL = "wss://screenguide-signal.example/v1"   # TODO: stand up server
+
+    def __init__(self):
+        self.code: Optional[str] = None
+        self.is_host: bool = False
+        self.peers: list = []
+        self._on_message: Optional[Callable[[dict], None]] = None
+        self._pc = None      # aiortc.RTCPeerConnection
+        self._channel = None # aiortc.RTCDataChannel
+
+    async def start_host(self) -> str:
+        """Create a session, register with the signalling server, return code."""
+        self.code = generate_code()
+        self.is_host = True
+        # TODO: connect to SIGNALLING_URL, register self.code, await join, set up
+        # RTCPeerConnection + data channel, plumb _on_message.
+        return self.code
+
+    async def join(self, code: str) -> bool:
+        """Connect to an existing session by code. Returns success."""
+        self.code = code
+        self.is_host = False
+        # TODO: connect to SIGNALLING_URL, request offer for `code`, accept,
+        # set local description, exchange ICE, plumb _on_message.
+        return False
+
+    async def send(self, msg: dict) -> None:
+        """Broadcast a message to all peers in the session."""
+        # TODO: when self._channel.readyState == "open", send JSON
+        pass
+
+    async def stop(self) -> None:
+        """Tear down peer connection."""
+        if self._channel:
+            try:
+                self._channel.close()
+            except Exception:
+                pass
+        if self._pc:
+            try:
+                await self._pc.close()
+            except Exception:
+                pass
+        self.code = None
+        self.peers = []
+
+    def on_message(self, callback: Callable[[dict], None]) -> None:
+        """Register a callback for incoming messages from peers."""
+        self._on_message = callback
