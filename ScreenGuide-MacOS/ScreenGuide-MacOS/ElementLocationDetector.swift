@@ -162,3 +162,55 @@ class ElementLocationDetector {
         // pixel-counting training that makes coordinate detection accurate.
         request.setValue("computer-use-2025-11-24", forHTTPHeaderField: "anthropic-beta")
 
+        // Detect image media type (PNG vs JPEG)
+        let mediaType = detectImageMediaType(for: resizedScreenshotData)
+        let base64Screenshot = resizedScreenshotData.base64EncodedString()
+
+        let userPrompt = """
+        The user asked this question while looking at their screen: "\(userQuestion)"
+
+        Look at the screenshot. If there is a specific UI element (button, link, menu item, text field, icon, etc.) that the user should interact with or is asking about, click on that element.
+
+        If the question is purely conceptual (e.g., "what does HTML mean?") and there's no specific element to point to, just respond with text saying "no specific element".
+        """
+
+        let body: [String: Any] = [
+            "model": model,
+            "max_tokens": 256,
+            "tools": [
+                [
+                    "type": "computer_20251124",
+                    "name": "computer",
+                    "display_width_px": declaredDisplayWidth,
+                    "display_height_px": declaredDisplayHeight
+                ]
+            ],
+            "messages": [
+                [
+                    "role": "user",
+                    "content": [
+                        [
+                            "type": "image",
+                            "source": [
+                                "type": "base64",
+                                "media_type": mediaType,
+                                "data": base64Screenshot
+                            ]
+                        ],
+                        [
+                            "type": "text",
+                            "text": userPrompt
+                        ]
+                    ]
+                ]
+            ]
+        ]
+
+        do {
+            let bodyData = try JSONSerialization.data(withJSONObject: body)
+            request.httpBody = bodyData
+
+            let payloadMB = Double(bodyData.count) / 1_048_576.0
+            print("🎯 ElementLocationDetector: sending \(String(format: "%.1f", payloadMB))MB request " +
+                  "(declared \(declaredDisplayWidth)x\(declaredDisplayHeight))")
+
