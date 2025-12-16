@@ -117,3 +117,40 @@ def is_vision_capable(model_name: str) -> bool:
     n = (model_name or "").lower()
     return any(kw in n for kw in _VISION_KEYWORDS)
 
+
+# ─── Pull helper ──────────────────────────────────────────────────────────────
+
+async def pull_model(name: str, host: str, on_progress=None) -> bool:
+    """Stream `ollama pull <name>` over the HTTP API.
+
+    Returns True on success. on_progress (optional) is called with status
+    strings as the download advances ("pulling manifest", "verifying", etc.).
+    """
+    import httpx
+
+    url = host.rstrip("/") + "/api/pull"
+    try:
+        async with httpx.AsyncClient(timeout=None) as client:
+            async with client.stream(
+                "POST", url, json={"name": name, "stream": True},
+            ) as r:
+                if r.status_code >= 400:
+                    return False
+                import json as _json
+                async for line in r.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        msg = _json.loads(line)
+                    except Exception:
+                        continue
+                    if on_progress:
+                        try:
+                            on_progress(msg.get("status", ""))
+                        except Exception:
+                            pass
+                    if msg.get("error"):
+                        return False
+                return True
+    except Exception:
+        return False
