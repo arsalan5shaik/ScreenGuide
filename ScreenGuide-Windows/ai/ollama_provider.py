@@ -49,3 +49,53 @@ class OllamaProvider(BaseLLMProvider):
         for msg in history:
             messages.append({"role": msg.role, "content": msg.content})
 
+        # Ollama passes images as base64 strings inside the message
+        user_msg: dict = {"role": "user", "content": user_text}
+        if screenshots_b64:
+            user_msg["images"] = screenshots_b64
+        messages.append(user_msg)
+
+        payload = {
+            "model": chosen,
+            "messages": messages,
+            "stream": True,
+            "options": {"num_predict": 1024},
+        }
+
+        async with httpx.AsyncClient(timeout=120) as client:
+            async with client.stream(
+                "POST",
+                f"{self._base}/api/chat",
+                json=payload,
+            ) as response:
+                if response.status_code == 404:
+                    # Surface a useful error when the chosen model isn't
+                    # installed locally — students hit this constantly.
+                    raise RuntimeError(
+                        f"Ollama doesn't have '{chosen}' installed. "
+                        f"Run `ollama pull {chosen}` or pick another model "
+                        f"from Tray → Ollama."
+                    )
+                response.raise_for_status()
+                import json
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                        chunk = data.get("message", {}).get("content", "")
+                        if chunk:
+                            yield chunk
+                        if data.get("done"):
+                            break
+                    except json.JSONDecodeError:
+                        continue
+
+    async def health_check(self) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                r = await client.get(f"{self._base}/api/tags")
+                return r.status_code == 200
+        except Exception:
+            return False
+
