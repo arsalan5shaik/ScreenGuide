@@ -52,3 +52,92 @@ _FALLBACKS: dict[str, list[dict]] = {
     ],
 }
 
+
+def _data_dir() -> Path:
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    d = Path(base) / "ScreenGuide"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _cache_path(provider: str) -> Path:
+    return _data_dir() / f"models_{provider}.json"
+
+
+# ─── Per-provider live fetchers ───────────────────────────────────────────────
+
+async def _fetch_claude() -> list[dict]:
+    if not cfg.anthropic_api_key:
+        return []
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(
+            "https://api.anthropic.com/v1/models",
+            headers={
+                "x-api-key": cfg.anthropic_api_key,
+                "anthropic-version": "2023-06-01",
+            },
+        )
+    r.raise_for_status()
+    data = r.json().get("data", [])
+    out = []
+    for m in data:
+        mid = m.get("id") or m.get("name")
+        if not mid:
+            continue
+        # All current Claude models are vision-capable; future ones likely too.
+        out.append({
+            "id": mid,
+            "label": m.get("display_name") or mid,
+            "vision": True,
+        })
+    # Newest first (Anthropic returns newest first already, but be defensive)
+    out.sort(key=lambda m: m["id"], reverse=True)
+    return out
+
+
+async def _fetch_openai() -> list[dict]:
+    if not cfg.openai_api_key:
+        return []
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": f"Bearer {cfg.openai_api_key}"},
+        )
+    r.raise_for_status()
+    data = r.json().get("data", [])
+    out = []
+    # Filter to chat-completion-capable models. OpenAI's /v1/models returns
+    # everything (embeddings, TTS, image-gen, audio, etc.) so we whitelist by
+    # known prefixes. Vision flag is true for the gpt-4o family + o3-vision.
+    chat_prefixes = ("gpt-4", "gpt-5", "o1", "o3", "o4", "chatgpt-")
+    # Models that match a chat prefix but are NOT chat-completion models —
+    # picking one of these makes ScreenGuide silently stop responding (e.g.
+    # "chatgpt-image-latest" generates images, it can't hold a conversation).
+    non_chat_markers = ("image", "audio", "realtime", "tts", "transcribe",
+                        "embed", "moderation", "dall", "instruct", "codex")
+    vision_prefixes = ("gpt-4o", "gpt-4-turbo", "gpt-4-vision", "gpt-5",
+                       "o1-", "o3-", "o4-")
+    seen = set()
+    for m in data:
+        mid = m.get("id")
+        if not mid or mid in seen:
+            continue
+        if not mid.startswith(chat_prefixes):
+            continue
+        if any(marker in mid for marker in non_chat_markers):
+            continue
+        # Skip dated snapshots — they're noise. Keep only the alias forms.
+        if any(c.isdigit() and "-" in mid[mid.index(c):] for c in mid if False):
+            pass
+        # Drop fine-tune / preview-snapshot variants like ".../2024-08-06"
+        if mid.count("-") >= 4 and any(seg.isdigit() for seg in mid.split("-")):
+            continue
+        seen.add(mid)
+        out.append({
+            "id": mid,
+            "label": mid,
+            "vision": mid.startswith(vision_prefixes),
+        })
+    out.sort(key=lambda m: m["id"])
+    return out
+
