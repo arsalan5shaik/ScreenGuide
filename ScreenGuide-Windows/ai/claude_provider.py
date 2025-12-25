@@ -54,3 +54,9 @@ class ClaudeProvider(BaseLLMProvider):
             async for text in stream.text_stream:
                 yield text
 
+    async def health_check(self) -> bool:
+        try:
+            await self._client.models.list()
+            return True
+        except Exception:
+            return False
