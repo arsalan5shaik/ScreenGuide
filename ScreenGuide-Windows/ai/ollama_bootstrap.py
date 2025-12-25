@@ -49,3 +49,53 @@ def is_ollama_running(timeout: float = 1.5) -> bool:
     except Exception:
         return False
 
+
+def is_ollama_installed() -> bool:
+    """Return True if the `ollama` binary is on PATH (server may still be off)."""
+    return shutil.which("ollama") is not None
+
+
+def list_installed_models() -> List[str]:
+    """Return the list of model tags installed locally. Empty list if Ollama is off."""
+    base = cfg.ollama_host.rstrip("/")
+    try:
+        r = httpx.get(f"{base}/api/tags", timeout=3.0)
+        r.raise_for_status()
+        data = r.json()
+        return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+    except Exception:
+        return []
+
+
+def is_model_installed(name: str) -> bool:
+    """Check whether a specific Ollama model tag (e.g. 'llama3.2:3b') is pulled."""
+    if not name:
+        return False
+    installed = list_installed_models()
+    # Ollama returns tags like 'llama3.2:3b'. Match by exact tag *or* base name
+    # so callers can pass either 'llama3.2' or 'llama3.2:3b'.
+    if name in installed:
+        return True
+    base = name.split(":", 1)[0]
+    return any(m.split(":", 1)[0] == base for m in installed)
+
+
+# ─── Pull a model with progress ───────────────────────────────────────────────
+
+def pull_model(
+    name: str,
+    on_progress: Optional[Callable[[str, float], None]] = None,
+    timeout: float = 1800.0,
+) -> bool:
+    """
+    Pull an Ollama model, streaming progress.
+
+    on_progress(status, percent) is called as the pull progresses.
+        status:  human-readable string (e.g. "downloading manifest")
+        percent: 0.0–100.0 (or 0.0 if unknown)
+
+    Returns True when the pull finishes successfully.
+    """
+    base = cfg.ollama_host.rstrip("/")
+    payload = {"name": name, "stream": True}
+
