@@ -214,3 +214,69 @@ class ElementLocationDetector {
             print("🎯 ElementLocationDetector: sending \(String(format: "%.1f", payloadMB))MB request " +
                   "(declared \(declaredDisplayWidth)x\(declaredDisplayHeight))")
 
+            let (data, response) = try await session.data(for: request)
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+                let errorBody = String(data: data, encoding: .utf8) ?? "unknown"
+                print("⚠️ ElementLocationDetector: API error \(statusCode): \(errorBody.prefix(200))")
+                return nil
+            }
+
+            return parseCoordinateFromResponse(data: data)
+
+        } catch {
+            print("⚠️ ElementLocationDetector: request failed: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// Parses the Computer Use API response to extract click coordinates.
+    /// Claude returns a `tool_use` content block with `{"action": "left_click", "coordinate": [x, y]}`.
+    /// If Claude returns text instead (no element found), returns nil.
+    private func parseCoordinateFromResponse(data: Data) -> CGPoint? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let contentBlocks = json["content"] as? [[String: Any]] else {
+            print("⚠️ ElementLocationDetector: could not parse response JSON")
+            return nil
+        }
+
+        // Look for a tool_use content block (Claude's Computer Use response format)
+        for block in contentBlocks {
+            guard let blockType = block["type"] as? String,
+                  blockType == "tool_use",
+                  let input = block["input"] as? [String: Any],
+                  let coordinate = input["coordinate"] as? [NSNumber],
+                  coordinate.count == 2 else {
+                continue
+            }
+
+            let x = CGFloat(coordinate[0].doubleValue)
+            let y = CGFloat(coordinate[1].doubleValue)
+            print("🎯 ElementLocationDetector: raw coordinate (\(Int(x)), \(Int(y)))")
+            return CGPoint(x: x, y: y)
+        }
+
+        // No tool_use block found — Claude responded with text (no element to point at)
+        print("🎯 ElementLocationDetector: no specific element detected (conceptual question)")
+        return nil
+    }
+
+    /// Resizes screenshot data to the specified Computer Use resolution.
+    /// The target resolution should match the display's aspect ratio to avoid
+    /// distortion that degrades coordinate accuracy.
+    ///
+    /// **Critical Retina fix**: Uses `NSBitmapImageRep` directly instead of
+    /// `NSImage.lockFocus()`. On Retina displays (2x backing scale), lockFocus
+    /// creates a bitmap at 2× the declared size (e.g., 2560×1600 for a 1280×800
+    /// NSImage). This means the JPEG sent to Claude would be 2× larger than the
+    /// resolution declared in the Computer Use tool definition, causing Claude's
+    /// pixel-counting to return coordinates in the wrong scale.
+    private func resizeScreenshotForComputerUse(
+        originalImageData: Data,
+        targetWidth: Int,
+        targetHeight: Int
+    ) -> Data? {
+        guard let originalImage = NSImage(data: originalImageData) else { return nil }
+
