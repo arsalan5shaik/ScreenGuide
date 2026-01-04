@@ -103,3 +103,63 @@ PROVIDER_LABELS = {
     "ollama":  f"Ollama ({cfg.ollama_model})",
 }
 
+# Provider model lists are fetched live from each vendor's /models endpoint
+# (see ai/model_registry.py for Claude/OpenAI/Gemini and
+# ai/github_copilot_provider.py for Copilot). The hardcoded lists below are
+# only used as offline fallbacks when no cache exists yet.
+
+
+def _copilot_model_choices() -> list[tuple[str, str]]:
+    """Returns [(model_id, display_label), ...] for the dropdown.
+    Free models first, then ascending multiplier. Display shows '(free)' /
+    '(1×)' so the user always knows what burns premium quota."""
+    try:
+        from ai.github_copilot_provider import (
+            cached_models, sorted_model_ids, model_label,
+        )
+    except Exception:
+        return [("gpt-4o-mini", "gpt-4o-mini  (free)")]
+    out = []
+    for mid in sorted_model_ids():
+        out.append((mid, model_label(mid)))
+    if not out:
+        out.append(("gpt-4o-mini", "gpt-4o-mini  (free)"))
+    return out
+
+
+class ProviderBadge(QLabel):
+    """Small pill showing active provider."""
+
+    def __init__(self, provider: str, parent=None):
+        super().__init__(parent)
+        self.set_provider(provider)
+        self.setStyleSheet(
+            "background: rgba(0,120,255,25); border: 1px solid rgba(0,120,255,100);"
+            "border-radius: 8px; color: rgb(140,180,255); font-size: 11px; padding: 2px 8px;"
+        )
+
+    def set_provider(self, provider: str):
+        self.setText(PROVIDER_LABELS.get(provider, provider))
+
+
+class CompanionPanel(QWidget):
+    """Floating companion control panel — equivalent to CompanionPanelView.swift."""
+
+    on_push_to_talk_pressed  = pyqtSignal()
+    on_push_to_talk_released = pyqtSignal()
+    on_model_changed         = pyqtSignal(str)
+    on_document_dropped      = pyqtSignal(str)
+    _sig_copilot_code        = pyqtSignal(str, str)   # (user_code, verification_uri)
+    _sig_copilot_error       = pyqtSignal(str)
+
+    def __init__(self):
+        super().__init__()
+        self._state = AppState.IDLE
+        self._response_text = ""
+        self._setup_window()
+        self._build_ui()
+        self._position_bottom_right()
+        # Wire internal thread-safe signals → main-thread slots
+        self._sig_copilot_code.connect(self._on_copilot_code)
+        self._sig_copilot_error.connect(self._on_copilot_error)
+
