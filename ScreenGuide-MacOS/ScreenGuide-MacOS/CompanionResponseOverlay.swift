@@ -52,3 +52,54 @@ final class CompanionResponseOverlayManager {
         resizePanelToFitContent()
     }
 
+    func finishStreaming() {
+        // Keep the response visible for a few seconds after streaming ends,
+        // then fade out so the user has time to read the last chunk.
+        let hideWork = DispatchWorkItem { [weak self] in
+            self?.fadeOutAndHide()
+        }
+        autoHideWorkItem = hideWork
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6, execute: hideWork)
+    }
+
+    func hideOverlay() {
+        autoHideWorkItem?.cancel()
+        autoHideWorkItem = nil
+        stopCursorTracking()
+        overlayViewModel.isShowingResponse = false
+        overlayViewModel.streamingResponseText = ""
+        overlayPanel?.orderOut(nil)
+    }
+
+    // MARK: - Private
+
+    private func createOverlayPanelIfNeeded() {
+        if overlayPanel != nil { return }
+
+        let initialFrame = NSRect(x: 0, y: 0, width: overlayMaxWidth, height: 40)
+        let responseOverlayPanel = NSPanel(
+            contentRect: initialFrame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+
+        responseOverlayPanel.level = .statusBar
+        responseOverlayPanel.isOpaque = false
+        responseOverlayPanel.backgroundColor = .clear
+        responseOverlayPanel.hasShadow = false
+        responseOverlayPanel.ignoresMouseEvents = true
+        responseOverlayPanel.hidesOnDeactivate = false
+        responseOverlayPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        responseOverlayPanel.isExcludedFromWindowsMenu = true
+
+        let hostingView = NSHostingView(
+            rootView: CompanionResponseOverlayView(viewModel: overlayViewModel)
+                .frame(maxWidth: overlayMaxWidth)
+        )
+        hostingView.frame = initialFrame
+        responseOverlayPanel.contentView = hostingView
+
+        overlayPanel = responseOverlayPanel
+    }
+
