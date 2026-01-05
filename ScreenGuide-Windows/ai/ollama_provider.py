@@ -99,3 +99,28 @@ class OllamaProvider(BaseLLMProvider):
         except Exception:
             return False
 
+    async def list_models(self) -> List[str]:
+        """Return all installed model names (flat list)."""
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                r = await client.get(f"{self._base}/api/tags")
+                data = r.json()
+                return [m["name"] for m in data.get("models", [])]
+        except Exception:
+            return []
+
+    async def list_models_classified(self) -> dict[str, list[str]]:
+        """Installed models split into {'vision': [...], 'text': [...]}.
+
+        Heuristic-based — see ollama_models_registry.is_vision_capable().
+        """
+        names = await self.list_models()
+        out: dict[str, list[str]] = {"vision": [], "text": []}
+        for n in names:
+            if is_vision_capable(n):
+                out["vision"].append(n)
+            else:
+                out["text"].append(n)
+        out["vision"].sort()
+        out["text"].sort()
+        return out
