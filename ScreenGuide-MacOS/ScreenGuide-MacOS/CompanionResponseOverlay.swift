@@ -103,3 +103,55 @@ final class CompanionResponseOverlayManager {
         overlayPanel = responseOverlayPanel
     }
 
+    private func startCursorTracking() {
+        // 60fps cursor tracking so the panel stays glued to the mouse
+        cursorTrackingTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.repositionPanelNearCursor()
+            }
+        }
+    }
+
+    private func stopCursorTracking() {
+        cursorTrackingTimer?.invalidate()
+        cursorTrackingTimer = nil
+    }
+
+    private func repositionPanelNearCursor() {
+        guard let overlayPanel else { return }
+
+        let mouseLocation = NSEvent.mouseLocation
+        let panelSize = overlayPanel.frame.size
+
+        // Position the panel to the right of and slightly below the cursor.
+        // In macOS screen coordinates, Y increases upward, so "below" means
+        // subtracting from the cursor Y.
+        var panelOriginX = mouseLocation.x + cursorOffsetX
+        var panelOriginY = mouseLocation.y - cursorOffsetY - panelSize.height
+
+        // Clamp to the visible frame of the screen containing the cursor
+        // so the panel never goes off-screen.
+        if let currentScreen = screenContainingPoint(mouseLocation) {
+            let visibleFrame = currentScreen.visibleFrame
+
+            // If the panel would go off the right edge, flip it to the left of the cursor
+            if panelOriginX + panelSize.width > visibleFrame.maxX {
+                panelOriginX = mouseLocation.x - cursorOffsetX - panelSize.width
+            }
+
+            // If the panel would go below the bottom edge, push it above the cursor
+            if panelOriginY < visibleFrame.minY {
+                panelOriginY = mouseLocation.y + cursorOffsetY
+            }
+
+            // Final clamp
+            panelOriginX = max(visibleFrame.minX, min(panelOriginX, visibleFrame.maxX - panelSize.width))
+            panelOriginY = max(visibleFrame.minY, min(panelOriginY, visibleFrame.maxY - panelSize.height))
+        }
+
+        overlayPanel.setFrameOrigin(CGPoint(x: panelOriginX, y: panelOriginY))
+    }
+
+    private func resizePanelToFitContent() {
+        guard let overlayPanel, let contentView = overlayPanel.contentView else { return }
+
