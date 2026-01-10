@@ -141,3 +141,58 @@ async def _fetch_openai() -> list[dict]:
     out.sort(key=lambda m: m["id"])
     return out
 
+
+async def _fetch_gemini() -> list[dict]:
+    if not cfg.google_api_key:
+        return []
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(
+            "https://generativelanguage.googleapis.com/v1beta/models",
+            params={"key": cfg.google_api_key},
+        )
+    r.raise_for_status()
+    data = r.json().get("models", [])
+    out = []
+    for m in data:
+        # Names look like "models/gemini-2.5-flash" — strip the prefix
+        full = m.get("name", "")
+        mid = full.replace("models/", "")
+        methods = m.get("supportedGenerationMethods", [])
+        if "generateContent" not in methods:
+            continue   # skip embedding-only / TTS-only models
+        if not mid:
+            continue
+        out.append({
+            "id": mid,
+            "label": m.get("displayName") or mid,
+            # All Gemini 1.5+ models accept images as input
+            "vision": "vision" in mid or "gemini-1.5" in mid or "gemini-2" in mid
+                      or "gemini-3" in mid,
+        })
+    # Sort: newer first (rough heuristic — versions in name)
+    out.sort(key=lambda m: m["id"], reverse=True)
+    return out
+
+
+_FETCHERS = {
+    "claude":  _fetch_claude,
+    "openai":  _fetch_openai,
+    "gemini":  _fetch_gemini,
+}
+
+
+# ─── Public API ───────────────────────────────────────────────────────────────
+
+def cached_models(provider: str) -> list[dict]:
+    """Read on-disk cache, falling back to a curated list if missing."""
+    p = _cache_path(provider)
+    if p.exists():
+        try:
+            blob = json.loads(p.read_text())
+            ms = blob.get("models", [])
+            if ms:
+                return ms
+        except Exception:
+            pass
+    return list(_FALLBACKS.get(provider, []))
+
