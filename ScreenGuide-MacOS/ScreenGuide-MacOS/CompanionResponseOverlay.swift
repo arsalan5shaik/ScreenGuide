@@ -155,3 +155,63 @@ final class CompanionResponseOverlayManager {
     private func resizePanelToFitContent() {
         guard let overlayPanel, let contentView = overlayPanel.contentView else { return }
 
+        let fittingSize = contentView.fittingSize
+        let newWidth = min(fittingSize.width, overlayMaxWidth)
+        let newHeight = fittingSize.height
+
+        // Keep the panel origin relative to the cursor (the timer handles that),
+        // but update the frame size so the content fits.
+        var frame = overlayPanel.frame
+        let heightDelta = newHeight - frame.height
+        frame.size = CGSize(width: newWidth, height: newHeight)
+        // Adjust origin Y so the panel grows upward (toward the cursor), not downward
+        frame.origin.y -= heightDelta
+        overlayPanel.setFrame(frame, display: true)
+        contentView.frame = NSRect(origin: .zero, size: frame.size)
+    }
+
+    private func fadeOutAndHide() {
+        guard let overlayPanel else { return }
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.4
+            overlayPanel.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            Task { @MainActor in
+                self?.hideOverlay()
+            }
+        })
+    }
+
+    private func screenContainingPoint(_ point: CGPoint) -> NSScreen? {
+        NSScreen.screens.first { $0.frame.contains(point) }
+    }
+}
+
+// MARK: - SwiftUI View
+
+private struct CompanionResponseOverlayView: View {
+    @ObservedObject var viewModel: CompanionResponseOverlayViewModel
+
+    var body: some View {
+        if viewModel.isShowingResponse {
+            Text(viewModel.streamingResponseText.isEmpty ? "..." : viewModel.streamingResponseText)
+                .font(.system(size: 13, weight: .regular))
+                .foregroundColor(DS.Colors.textPrimary)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 300, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(DS.Colors.surface1.opacity(0.95))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(DS.Colors.borderSubtle.opacity(0.5), lineWidth: 0.8)
+                        )
+                        .shadow(color: Color.black.opacity(0.35), radius: 16, x: 0, y: 8)
+                )
+        }
+    }
+}
