@@ -103,3 +103,54 @@ enum BuddyPushToTalkShortcut {
     ) -> ShortcutTransition {
         guard let shortcutEventType = shortcutEventType(for: event.type) else { return .none }
 
+        return shortcutTransition(
+            for: shortcutEventType,
+            keyCode: event.keyCode,
+            modifierFlags: event.modifierFlags.intersection(.deviceIndependentFlagsMask),
+            wasShortcutPreviouslyPressed: wasShortcutPreviouslyPressed
+        )
+    }
+
+    static func shortcutTransition(
+        for eventType: CGEventType,
+        keyCode: UInt16,
+        modifierFlagsRawValue: UInt64,
+        wasShortcutPreviouslyPressed: Bool
+    ) -> ShortcutTransition {
+        guard let shortcutEventType = shortcutEventType(for: eventType) else { return .none }
+
+        return shortcutTransition(
+            for: shortcutEventType,
+            keyCode: keyCode,
+            modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(modifierFlagsRawValue))
+                .intersection(.deviceIndependentFlagsMask),
+            wasShortcutPreviouslyPressed: wasShortcutPreviouslyPressed
+        )
+    }
+
+    private static func shortcutEventType(for eventType: NSEvent.EventType) -> ShortcutEventType? {
+        switch eventType {
+        case .flagsChanged:
+            return .flagsChanged
+        case .keyDown:
+            return .keyDown
+        case .keyUp:
+            return .keyUp
+        default:
+            return nil
+        }
+    }
+
+    private static func shortcutEventType(for eventType: CGEventType) -> ShortcutEventType? {
+        switch eventType {
+        case .flagsChanged:
+            return .flagsChanged
+        case .keyDown:
+            return .keyDown
+        case .keyUp:
+            return .keyUp
+        default:
+            return nil
+        }
+    }
+
