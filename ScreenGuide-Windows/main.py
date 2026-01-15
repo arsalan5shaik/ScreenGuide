@@ -57,3 +57,57 @@ def _copilot_login_flow(tray, panel, manager):
             tray.show_notification("Copilot login failed", str(e))
             panel.show_copilot_error(str(e))
 
+    threading.Thread(target=_worker, daemon=True).start()
+
+
+def _setup_logging():
+    """Rotating runtime log at %LOCALAPPDATA%\\ScreenGuide\\screenguide.log — the #1
+    ask from bug reports: with no log file, 'stuck on Listening' class issues
+    were undiagnosable."""
+    import logging
+    from logging.handlers import RotatingFileHandler
+
+    log_dir = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "ScreenGuide"
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            log_dir / "screenguide.log", maxBytes=1_000_000, backupCount=2,
+            encoding="utf-8",
+        )
+        handler.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)-7s %(name)s: %(message)s"
+        ))
+        root = logging.getLogger()
+        root.setLevel(logging.INFO)
+        root.addHandler(handler)
+        logging.getLogger("screenguide").info(
+            "=== ScreenGuide starting (python %s) ===", sys.version.split()[0]
+        )
+    except Exception:
+        pass  # logging must never block startup
+
+
+def main():
+    _setup_logging()
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+    )
+    app = QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
+    app.setApplicationName("ScreenGuide")
+    app.setApplicationDisplayName("ScreenGuide - AI Companion")
+
+    # ── Core components ───────────────────────────────────────────────────────
+    manager = CompanionManager()
+    panel   = CompanionPanel()
+    overlay = CursorOverlay()
+    tray    = TrayManager()
+
+    # ── Wire signals ──────────────────────────────────────────────────────────
+
+    # State changes → Panel + Tray + Cursor
+    def _on_state(state: AppState):
+        panel.set_state(state)
+        tray.set_state_icon(state.name.lower())
+        overlay.set_mode(STATE_TO_CURSOR_MODE.get(state, MODE_IDLE))
+
