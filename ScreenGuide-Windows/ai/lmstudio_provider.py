@@ -49,3 +49,54 @@ class LMStudioProvider(BaseLLMProvider):
         for msg in history:
             messages.append({"role": msg.role, "content": msg.content})
 
+        # OpenAI-style multimodal content blocks (LM Studio's vision models
+        # accept the same image_url/base64 shape as OpenAI's API).
+        content: list = []
+        for img_b64 in screenshots_b64:
+            content.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+            })
+        content.append({"type": "text", "text": user_text})
+        messages.append({"role": "user", "content": content if screenshots_b64 else user_text})
+
+        payload = {
+            "model": chosen,
+            "messages": messages,
+            "max_tokens": 1024,
+            "stream": True,
+        }
+
+        async with httpx.AsyncClient(timeout=120) as client:
+            try:
+                async with client.stream(
+                    "POST",
+                    f"{self._base}/chat/completions",
+                    json=payload,
+                ) as response:
+                    if response.status_code == 404:
+                        raise RuntimeError(
+                            "LM Studio server not reachable at "
+                            f"{self._base}. Open LM Studio → Developer tab → "
+                            "Start Server, and make sure a model is loaded."
+                        )
+                    response.raise_for_status()
+                    async for line in response.aiter_lines():
+                        if not line.strip() or not line.startswith("data:"):
+                            continue
+                        data_str = line[len("data:"):].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(data_str)
+                            delta = data["choices"][0]["delta"].get("content")
+                            if delta:
+                                yield delta
+                        except (json.JSONDecodeError, KeyError, IndexError):
+                            continue
+            except httpx.ConnectError as e:
+                raise RuntimeError(
+                    "Can't reach LM Studio. Is the local server running? "
+                    "(LM Studio → Developer tab → Start Server)"
+                ) from e
+
