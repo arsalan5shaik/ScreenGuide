@@ -99,3 +99,58 @@ def pull_model(
     base = cfg.ollama_host.rstrip("/")
     payload = {"name": name, "stream": True}
 
+    try:
+        with httpx.stream(
+            "POST", f"{base}/api/pull", json=payload, timeout=timeout
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except Exception:
+                    continue
+
+                status = msg.get("status", "")
+                total = msg.get("total")
+                done = msg.get("completed")
+                pct = 0.0
+                if total and done:
+                    try:
+                        pct = (float(done) / float(total)) * 100.0
+                    except Exception:
+                        pct = 0.0
+
+                if on_progress:
+                    try:
+                        on_progress(status, pct)
+                    except Exception:
+                        pass
+
+                if status == "success":
+                    return True
+        return True
+    except Exception as e:
+        if on_progress:
+            on_progress(f"error: {e}", 0.0)
+        return False
+
+
+# ─── Installer download / run ─────────────────────────────────────────────────
+
+def _default_installer_path() -> Path:
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    d = Path(base) / "ScreenGuide" / "downloads"
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "OllamaSetup.exe"
+
+
+def download_ollama_installer(
+    dest: Optional[Path] = None,
+    on_progress: Optional[Callable[[float], None]] = None,
+) -> Path:
+    """Download the official Ollama installer. Returns the local path on success."""
+    target = Path(dest) if dest else _default_installer_path()
+    tmp = target.with_suffix(target.suffix + ".part")
+
