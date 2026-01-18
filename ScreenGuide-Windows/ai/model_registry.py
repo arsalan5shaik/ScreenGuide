@@ -196,3 +196,54 @@ def cached_models(provider: str) -> list[dict]:
             pass
     return list(_FALLBACKS.get(provider, []))
 
+
+def cache_is_stale(provider: str, ttl: int = CACHE_TTL_SECONDS) -> bool:
+    p = _cache_path(provider)
+    if not p.exists():
+        return True
+    try:
+        blob = json.loads(p.read_text())
+        return (time.time() - float(blob.get("fetched_at", 0))) > ttl
+    except Exception:
+        return True
+
+
+async def refresh(provider: str) -> list[dict]:
+    """Fetch live + write to cache. Returns the new model list (raises on error)."""
+    fetcher = _FETCHERS.get(provider)
+    if not fetcher:
+        raise ValueError(f"No live model fetcher for provider '{provider}'")
+    models = await fetcher()
+    if not models:
+        # No key → no models. Don't overwrite cache with empty list.
+        return cached_models(provider)
+    blob = {"fetched_at": time.time(), "models": models}
+    _cache_path(provider).write_text(json.dumps(blob, indent=2))
+    return models
+
+
+async def refresh_all_stale() -> dict[str, int]:
+    """Refresh every provider whose cache is stale. Returns counts per provider."""
+    results = {}
+    for provider in _FETCHERS:
+        if cache_is_stale(provider):
+            try:
+                ms = await refresh(provider)
+                results[provider] = len(ms)
+            except Exception as e:
+                results[provider] = -1   # signals failure
+    return results
+
+
+def model_ids(provider: str) -> list[str]:
+    return [m["id"] for m in cached_models(provider)]
+
+
+def best_default(provider: str) -> Optional[str]:
+    """Pick a sensible default model from the cache — vision-capable first."""
+    models = cached_models(provider)
+    for m in models:
+        if m.get("vision"):
+            return m["id"]
+    return models[0]["id"] if models else None
+
