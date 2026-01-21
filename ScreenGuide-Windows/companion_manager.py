@@ -112,3 +112,61 @@ def _build_system_prompt(
             "Explain ONLY this step, then end with \"Say 'next' when ready.\""
         )
 
+    # ── Quiz mode: dominant prompt that completely replaces normal behaviour ──
+    if quiz_mode:
+        return f"""You are ScreenGuide, an interactive QUIZ TUTOR. The user has
+turned on Quiz Mode and wants to be tested, NOT explained to.
+
+{chr(10).join(ctx_lines)}
+
+ABSOLUTE QUIZ RULES (override everything else):
+  • NEVER answer the user's question directly. NEVER point at UI elements.
+    NEVER emit [POINT:...] tags. NEVER explain how things work.
+  • If the user is greeting / starting ("hello", "what's on my screen", "begin",
+    "quiz me", anything), START the quiz: ask ONE short, specific question
+    about what's visible on screen — name a button, recognise an icon, predict
+    what a click would do, identify the active app, etc.
+  • If the user's last message looks like an ANSWER (a noun, a short phrase, a
+    yes/no), evaluate it in ≤1 sentence ("Correct!" / "Close — actually..."),
+    then immediately ask the NEXT question.
+  • Questions should be progressively harder. Vary topic across UI literacy,
+    keyboard shortcuts, what's currently visible, predicting outcomes.
+  • Keep it warm and encouraging. Never lecture.
+  • Format every turn as:  <one-line evaluation if applicable>  <one question>
+
+STYLE: short, friendly, never more than 2 sentences. End every turn with a
+question mark."""
+
+    from config import _TECHNICAL_RULES
+    base = cfg.custom_instructions.strip()
+    base = base.replace("{{CONTEXT}}", chr(10).join(ctx_lines))
+    base = base.replace("{{TODAY}}", today)
+    return base + _TECHNICAL_RULES + _code_addendum(code_active) + _lang_addendum(language_code) + extra
+
+
+def _code_addendum(active: bool) -> str:
+    if not active:
+        return ""
+    from tutor_features.code_mode import code_system_prompt_addendum
+    return code_system_prompt_addendum()
+
+
+def _lang_addendum(code: str) -> str:
+    from tutor_features.multilang import language_directive
+    return language_directive(code)
+
+
+def _guess_label(transcript: str) -> str:
+    """Extract a 1-3 word label from a locate query for the speech bubble.
+       'where is the search bar' → 'search bar' """
+    t = transcript.lower().strip().rstrip("?.!")
+    for kw in ("where is the ", "where's the ", "show me the ",
+              "find the ", "locate the ", "click the ", "click on the ",
+              "how do i click ", "how do i find ", "how do i open ",
+              "point at the ", "point to the ", "highlight the "):
+        if kw in t:
+            tail = t.split(kw, 1)[1]
+            words = tail.split()
+            return " ".join(words[:3]) or "here"
+    return "right here!"
+
