@@ -280,3 +280,56 @@ class ElementLocationDetector {
     ) -> Data? {
         guard let originalImage = NSImage(data: originalImageData) else { return nil }
 
+        // Create a bitmap representation with exact pixel dimensions.
+        // This bypasses NSImage's Retina-aware coordinate system which would
+        // otherwise double the actual pixel count on 2x displays.
+        guard let bitmapRep = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: targetWidth,
+            pixelsHigh: targetHeight,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            return nil
+        }
+
+        // Set the point size to match pixel dimensions (1:1, no Retina scaling).
+        bitmapRep.size = NSSize(width: targetWidth, height: targetHeight)
+
+        // Draw the original image into the exact-pixel-dimension bitmap
+        NSGraphicsContext.saveGraphicsState()
+        let graphicsContext = NSGraphicsContext(bitmapImageRep: bitmapRep)
+        NSGraphicsContext.current = graphicsContext
+        graphicsContext?.imageInterpolation = .high
+        originalImage.draw(
+            in: NSRect(x: 0, y: 0, width: targetWidth, height: targetHeight),
+            from: NSRect(origin: .zero, size: originalImage.size),
+            operation: .copy,
+            fraction: 1.0
+        )
+        NSGraphicsContext.restoreGraphicsState()
+
+        guard let jpegData = bitmapRep.representation(using: .jpeg, properties: [.compressionFactor: 0.85]) else {
+            return nil
+        }
+
+        return jpegData
+    }
+
+    /// Detects MIME type by inspecting the first bytes of image data.
+    private func detectImageMediaType(for imageData: Data) -> String {
+        if imageData.count >= 4 {
+            let pngSignature: [UInt8] = [0x89, 0x50, 0x4E, 0x47]
+            let firstFourBytes = [UInt8](imageData.prefix(4))
+            if firstFourBytes == pngSignature {
+                return "image/png"
+            }
+        }
+        return "image/jpeg"
+    }
+}
