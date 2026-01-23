@@ -247,3 +247,29 @@ def best_default(provider: str) -> Optional[str]:
             return m["id"]
     return models[0]["id"] if models else None
 
+
+# ─── CLI: `python -m ai.model_registry [show|refresh] [provider]` ─────────────
+
+if __name__ == "__main__":
+    import sys
+    cmd = sys.argv[1] if len(sys.argv) >= 2 else "show"
+    target = sys.argv[2] if len(sys.argv) >= 3 else None
+
+    if cmd == "show":
+        for prov in (target,) if target else _FETCHERS:
+            stale = "stale" if cache_is_stale(prov) else "fresh"
+            print(f"\n[{prov}] {stale}")
+            for m in cached_models(prov):
+                v = "👁" if m.get("vision") else "  "
+                print(f"  {v} {m['id']}")
+    elif cmd == "refresh":
+        async def _run():
+            for prov in (target,) if target else _FETCHERS:
+                try:
+                    ms = await refresh(prov)
+                    print(f"[{prov}] refreshed {len(ms)} models")
+                except Exception as e:
+                    print(f"[{prov}] FAILED: {e}")
+        asyncio.run(_run())
+    else:
+        print("Usage: python -m ai.model_registry [show|refresh] [claude|openai|gemini]")
