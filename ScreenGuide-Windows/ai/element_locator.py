@@ -107,3 +107,55 @@ async def detect_element(
         "\"no specific element\"."
     )
 
+    body = {
+        "model": model,
+        "max_tokens": 256,
+        "tools": [{
+            "type": "computer_20251124",
+            "name": "computer",
+            "display_width_px": tw,
+            "display_height_px": th,
+        }],
+        "messages": [{
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": resized_b64,
+                    },
+                },
+                {"type": "text", "text": user_prompt},
+            ],
+        }],
+    }
+
+    headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "anthropic-beta": _BETA_HEADER,
+        "content-type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(_API_URL, json=body, headers=headers)
+            if r.status_code >= 400:
+                return None
+            data = r.json()
+    except Exception:
+        return None
+
+    # Find a tool_use block with coordinate
+    for block in data.get("content", []):
+        if block.get("type") != "tool_use":
+            continue
+        coord = (block.get("input") or {}).get("coordinate")
+        if not coord or len(coord) != 2:
+            continue
+        cu_x, cu_y = float(coord[0]), float(coord[1])
+        cu_x = max(0.0, min(cu_x, tw))
+        cu_y = max(0.0, min(cu_y, th))
+
