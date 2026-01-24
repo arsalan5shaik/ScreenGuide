@@ -163,3 +163,56 @@ class CompanionPanel(QWidget):
         self._sig_copilot_code.connect(self._on_copilot_code)
         self._sig_copilot_error.connect(self._on_copilot_error)
 
+    def _setup_window(self):
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(PANEL_WIDTH, PANEL_HEIGHT)
+        self.setObjectName("panel")
+        self.setStyleSheet(PANEL_QSS)
+        self.setAcceptDrops(True)   # drag-drop PDFs / DOCX / TXT
+
+    # ── Drag-drop handlers ───────────────────────────────────────────────────
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        for url in event.mimeData().urls():
+            path = url.toLocalFile()
+            if path:
+                self.on_document_dropped.emit(path)
+        event.acceptProposedAction()
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 18, 18, 18)
+        root.setSpacing(12)
+
+        # Header
+        header = QHBoxLayout()
+        title = QLabel("ScreenGuide")
+        title.setObjectName("title")
+        title.setFont(FONT_TITLE)
+        header.addWidget(title)
+        header.addStretch()
+        provider = cfg.llm_provider()
+        self._badge = ProviderBadge(provider)
+        header.addWidget(self._badge)
+
+        # Minimize button — hides the panel back to tray
+        self._min_btn = QPushButton("—")
+        self._min_btn.setFixedSize(24, 24)
+        self._min_btn.setStyleSheet(
+            "QPushButton { background: rgba(60,60,75,180); color: rgb(220,220,230);"
+            "border: none; border-radius: 12px; font-size: 14px; font-weight: bold; }"
+            "QPushButton:hover { background: rgba(80,80,95,220); }"
+        )
+        self._min_btn.setToolTip("Hide panel (use tray to reopen)")
+        self._min_btn.clicked.connect(self.hide)
+        header.addWidget(self._min_btn)
+        root.addLayout(header)
+
