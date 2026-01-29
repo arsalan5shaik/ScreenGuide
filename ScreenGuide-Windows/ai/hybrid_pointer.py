@@ -49,3 +49,59 @@ class Target:
     source: str           # "uia" | "ocr" | "vision"
     confidence: float     # 0.0–1.0
 
+    @property
+    def center_xy(self) -> Tuple[int, int]:
+        return (self.x, self.y)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  TIER 1 — Windows UI Automation
+# ──────────────────────────────────────────────────────────────────────────────
+
+_INTERACTIVE_TYPES = {
+    # Most reliable click targets in UIA
+    "Button", "Hyperlink", "MenuItem", "TabItem", "TreeItem", "ListItem",
+    "RadioButton", "CheckBox", "ComboBox", "Edit", "Text",
+    "Custom",  # often used by Electron / web apps
+}
+
+
+def _normalize(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def _score_match(query: str, element_name: str, element_type: str) -> float:
+    """Fuzzy match score 0..1. Boosts:
+      - exact substring match in the element name
+      - interactive control types
+      - whole-word match
+    """
+    q = _normalize(query)
+    name = _normalize(element_name)
+    if not q or not name:
+        return 0.0
+    score = 0.0
+    if q == name:
+        score = 1.0
+    elif q in name:
+        score = 0.85
+    else:
+        # Word overlap
+        q_words = set(q.split())
+        n_words = set(name.split())
+        if q_words and n_words:
+            overlap = len(q_words & n_words) / max(len(q_words), 1)
+            score = overlap * 0.7
+    if element_type in _INTERACTIVE_TYPES:
+        score = min(1.0, score + 0.1)
+    return score
+
+
+def _find_via_uia(query: str, min_score: float = 0.5) -> Optional[Target]:
+    """Walk the UIA tree for the foreground window + descendants, find best match."""
+    try:
+        import uiautomation as auto
+    except ImportError:
+        log.warning("uiautomation not installed — Tier 1 (UIA) disabled")
+        return None
+
