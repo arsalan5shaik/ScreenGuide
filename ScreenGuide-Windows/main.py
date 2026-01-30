@@ -111,3 +111,57 @@ def main():
         tray.set_state_icon(state.name.lower())
         overlay.set_mode(STATE_TO_CURSOR_MODE.get(state, MODE_IDLE))
 
+    manager.sig_state_changed.connect(_on_state)
+
+    # Response streaming
+    manager.sig_response_chunk.connect(panel.append_response_chunk)
+
+    # Audio level → cursor waveform (+ panel meter)
+    manager.sig_audio_level.connect(panel.set_audio_level)
+    manager.sig_audio_level.connect(overlay.set_audio_level)
+
+    # Pointing directives
+    manager.sig_point_at.connect(overlay.point_at)
+    manager.sig_point_hold.connect(overlay.set_point_hold)
+    manager.sig_point_release.connect(overlay.release_point)
+
+    # Whiteboard annotations (legacy per-shape signals)
+    manager.sig_arrow.connect(overlay.add_arrow)
+    manager.sig_circle.connect(overlay.add_circle)
+    manager.sig_underline.connect(overlay.add_underline)
+    manager.sig_label.connect(overlay.add_text)
+    # Teaching drawings — generic shape channel with progressive animation
+    manager.sig_draw.connect(overlay.add_shape)
+    manager.sig_clear_drawings.connect(overlay.clear_annotations)
+
+    # Errors
+    manager.sig_error.connect(
+        lambda e: tray.show_notification("ScreenGuide error", str(e))
+    )
+
+    # Panel → Manager
+    panel.on_model_changed.connect(manager.set_model)
+
+    def _on_doc_dropped(path: str):
+        ok = manager.attach_document(path)
+        tray.show_notification(
+            "Document Attached" if ok else "Attach failed",
+            f"{path}\nAsk ScreenGuide about it now." if ok else
+            "Couldn't read that file."
+        )
+    panel.on_document_dropped.connect(_on_doc_dropped)
+
+    # Tray → UI / Manager
+    tray.on_show_panel.connect(panel.show)
+    tray.on_hide_panel.connect(panel.hide)
+    tray.on_toggle_search.connect(manager.set_web_search)
+    tray.on_toggle_wake_word.connect(manager.set_wake_word)
+    tray.on_toggle_slow_mode.connect(manager.set_slow_mode)
+    tray.on_toggle_slow_mode.connect(overlay.set_slow_mode)
+    tray.on_toggle_quiz_mode.connect(manager.set_quiz_mode)
+    tray.on_toggle_privacy.connect(manager.set_privacy_guard)
+    tray.on_toggle_code_mode.connect(manager.set_code_mode_auto)
+    tray.on_toggle_multilang.connect(manager.set_multilang)
+    tray.on_toggle_journal.connect(manager.set_journal)
+    tray.on_toggle_ocr.connect(manager.set_ocr_enabled)
+
