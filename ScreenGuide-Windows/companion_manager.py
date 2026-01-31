@@ -170,3 +170,64 @@ def _guess_label(transcript: str) -> str:
             return " ".join(words[:3]) or "here"
     return "right here!"
 
+
+def _split_steps(text: str) -> list[str]:
+    """Parse a numbered list out of an LLM response. Returns [] if not a list."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    steps = []
+    for ln in lines:
+        m = re.match(r"^(?:\d+[\).]|[-*])\s+(.+)$", ln)
+        if m:
+            steps.append(m.group(1).strip())
+    return steps
+
+
+def _speakable(text: str) -> str:
+    """Make LLM text safe for TTS: models emit LaTeX ("\\( a \\)",
+    "\\[ a^2 + b^2 = c^2 \\]") and markdown that edge-tts reads aloud
+    verbatim as gibberish. Convert to spoken math / plain words."""
+    t = text
+    t = re.sub(r'\\(?:left|right)\b', '', t)
+    t = re.sub(r'\\sqrt\s*\{([^{}]*)\}', r'the square root of \1', t)
+    t = re.sub(r'\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}', r'\1 over \2', t)
+    t = (t.replace('\\times', ' times ').replace('\\cdot', ' times ')
+          .replace('\\pi', ' pi ').replace('\\theta', ' theta ')
+          .replace('\\alpha', ' alpha ').replace('\\beta', ' beta '))
+    t = re.sub(r'\\[\[\(\]\)]', '', t)              # \( \) \[ \] delimiters
+    t = re.sub(r'\^\s*\{?2\}?', ' squared', t)
+    t = re.sub(r'\^\s*\{?3\}?', ' cubed', t)
+    t = re.sub(r'\^\s*\{?(\d+)\}?', r' to the power \1', t)
+    t = t.replace('²', ' squared').replace('³', ' cubed')
+    t = re.sub(r'\\[a-zA-Z]+', ' ', t)              # any leftover \commands
+    t = re.sub(r'[{}]', '', t)
+    t = re.sub(r'[*_#`]+', '', t)                   # markdown emphasis/headers
+    t = re.sub(r'\s+', ' ', t).strip()
+    return t
+
+
+POINT_RE = re.compile(r'\[POINT:(\d+),(\d+):([^:\]]+):screen(\d+)\]')
+# A partial "[POINT..." prefix that hasn't closed yet — hold it back from display
+# until the next chunk so we never leak a half tag.
+POINT_PARTIAL_RE = re.compile(r'\[(?:P|PO|POI|POIN|POINT|POINT:[^\]]*)?$')
+
+# ── Teaching / drawing tags ──────────────────────────────────────────────────
+# ALL coordinates are normalized 0-1000 relative to the screenshot the model
+# saw (x: 0=left edge, 1000=right edge; y: 0=top, 1000=bottom). The manager
+# converts to logical screen pixels via _denorm(). Trailing :color is optional
+# on every shape.
+_C = r'(?::([a-z]+))?'                       # optional trailing color group
+LINE_RE      = re.compile(r'\[LINE:(\d+),(\d+)->(\d+),(\d+)' + _C + r'\]')
+ARROW_RE     = re.compile(r'\[ARROW:(\d+),(\d+)->(\d+),(\d+)' + _C + r'\]')
+CIRCLE_RE    = re.compile(r'\[CIRCLE:(\d+),(\d+),(\d+)(?::([^:\]]*))?' + _C + r'\]')
+RECT_RE      = re.compile(r'\[RECT:(\d+),(\d+),(\d+),(\d+)' + _C + r'\]')
+POLY_RE      = re.compile(r'\[POLY:((?:\d+,\d+[ ]*)+)' + _C + r'\]')
+TEXT_RE      = re.compile(r'\[TEXT:(\d+),(\d+):([^:\]]+)' + _C + r'(?::(s|m|l))?\]')
+ANGLE_RE     = re.compile(r'\[ANGLE:(\d+),(\d+),(\d+)(?:,(-?\d+))?' + _C + r'\]')
+UNDERLINE_RE = re.compile(r'\[UNDERLINE:(\d+),(\d+),(\d+)' + _C + r'\]')
+LABEL_RE     = re.compile(r'\[LABEL:(\d+),(\d+):([^:\]]+)' + _C + r'\]')
+CLEAR_RE     = re.compile(r'\[CLEAR\]')
+# Anchor forms — element resolved by name via the hybrid pointer (UIA), so
+# the model never guesses coordinates for real UI: [CIRCLE:@Save button]
+CIRCLE_AT_RE    = re.compile(r'\[CIRCLE:@([^:\]]+?)' + _C + r'\]')
+UNDERLINE_AT_RE = re.compile(r'\[UNDERLINE:@([^:\]]+?)' + _C + r'\]')
+
