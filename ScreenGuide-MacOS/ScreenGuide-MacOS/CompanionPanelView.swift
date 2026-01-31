@@ -99,3 +99,57 @@ struct CompanionPanelView: View {
 
             Spacer()
 
+            Text(statusText)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(DS.Colors.textTertiary)
+
+            Button(action: {
+                NotificationCenter.default.post(name: .screenguideDismissPanel, object: nil)
+            }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(DS.Colors.textTertiary)
+                    .frame(width: 20, height: 20)
+                    .background(
+                        Circle()
+                            .fill(Color.white.opacity(0.08))
+                    )
+            }
+            .buttonStyle(.plain)
+            .pointerCursor()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+    }
+
+    // MARK: - Permissions Copy
+
+    @ViewBuilder
+    private var permissionsCopySection: some View {
+        if companionManager.hasCompletedOnboarding && companionManager.allPermissionsGranted {
+            Text("Hold Control+Option to talk.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(DS.Colors.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if companionManager.allPermissionsGranted && !companionManager.hasSubmittedEmail {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Drop your email to get started.")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+                Text("If I keep building this, I'll keep you in the loop.")
+                    .font(.system(size: 11))
+                    .foregroundColor(DS.Colors.textTertiary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if companionManager.allPermissionsGranted {
+            Text("You're all set. Hit Start to meet ScreenGuide.")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(DS.Colors.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        } else if companionManager.hasCompletedOnboarding {
+            // Permissions were revoked after onboarding — tell user to re-grant
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Permissions needed")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(DS.Colors.textSecondary)
+
