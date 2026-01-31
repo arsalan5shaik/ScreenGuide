@@ -50,3 +50,55 @@ STAGE1_ROWS = 8
 STAGE2_COLS = 6
 STAGE2_ROWS = 6
 
+# Stage-2 zoom region size in Stage-1 cells (3 means 3×3 cells around the pick)
+ZOOM_RADIUS_CELLS = 1   # → 3×3 region
+
+# Max width to send to the LLM (smaller = faster + fewer tokens, less accurate)
+MAX_INFERENCE_WIDTH = 1280
+
+
+@dataclass
+class Detected:
+    x: int             # logical Qt screen px (already DPI/origin-adjusted)
+    y: int
+    screen_index: int
+
+
+# ─── Grid drawing ─────────────────────────────────────────────────────────────
+
+def _load_font(size: int) -> ImageFont.ImageFont:
+    """Best-effort font loader — falls back to PIL default if missing."""
+    for name in ("arialbd.ttf", "arial.ttf", "DejaVuSans-Bold.ttf"):
+        try:
+            return ImageFont.truetype(name, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _draw_grid(
+    img: Image.Image,
+    cols: int,
+    rows: int,
+    *,
+    line_color=(255, 0, 0, 200),
+    label_bg=(255, 0, 0, 220),
+    label_fg=(255, 255, 255, 255),
+) -> Image.Image:
+    """Overlay a numbered grid on top of `img`. Returns a new RGB image."""
+    base = img.convert("RGBA")
+    overlay = Image.new("RGBA", base.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    w, h = base.size
+    cell_w = w / cols
+    cell_h = h / rows
+
+    # Grid lines
+    for c in range(1, cols):
+        x = int(c * cell_w)
+        draw.line([(x, 0), (x, h)], fill=line_color, width=1)
+    for r in range(1, rows):
+        y = int(r * cell_h)
+        draw.line([(0, y), (w, y)], fill=line_color, width=1)
+
