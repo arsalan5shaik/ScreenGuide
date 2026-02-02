@@ -154,3 +154,53 @@ def download_ollama_installer(
     target = Path(dest) if dest else _default_installer_path()
     tmp = target.with_suffix(target.suffix + ".part")
 
+    with httpx.stream("GET", OLLAMA_DOWNLOAD_URL, timeout=120.0, follow_redirects=True) as r:
+        r.raise_for_status()
+        total = int(r.headers.get("content-length", "0"))
+        downloaded = 0
+        with open(tmp, "wb") as f:
+            for chunk in r.iter_bytes(chunk_size=64 * 1024):
+                f.write(chunk)
+                downloaded += len(chunk)
+                if on_progress and total:
+                    try:
+                        on_progress((downloaded / total) * 100.0)
+                    except Exception:
+                        pass
+
+    tmp.replace(target)
+    return target
+
+
+def run_ollama_installer(path: Path, silent: bool = False) -> int:
+    """
+    Launch the Ollama installer. Returns the process exit code.
+
+    If silent=True we use Ollama's silent install flag (/SILENT). The official
+    Ollama installer is an Inno Setup wizard so it accepts the standard flags.
+    """
+    args: List[str] = [str(path)]
+    if silent:
+        args.append("/SILENT")
+    proc = subprocess.run(args, shell=False)
+    return proc.returncode
+
+
+def wait_for_ollama_server(timeout: float = 60.0, poll_interval: float = 1.0) -> bool:
+    """Block until the Ollama server is reachable, or timeout."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if is_ollama_running():
+            return True
+        time.sleep(poll_interval)
+    return False
+
+
+# ─── CLI usage: `python -m ai.ollama_bootstrap status|install|pull <model>` ───
+
+def _cli():
+    args = sys.argv[1:]
+    if not args:
+        print("Usage: python -m ai.ollama_bootstrap [status|install|pull <model>|diag]")
+        return
+
