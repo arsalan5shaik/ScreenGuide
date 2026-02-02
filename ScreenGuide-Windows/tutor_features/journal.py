@@ -64,3 +64,54 @@ def _connect() -> sqlite3.Connection:
     )
     return conn
 
+
+# ─── Logging ──────────────────────────────────────────────────────────────────
+
+def log_qa(
+    question: str,
+    answer: str,
+    *,
+    app_key: str = "",
+    window_title: str = "",
+    provider: str = "",
+    model: str = "",
+    tags: str = "",
+) -> int:
+    if not question.strip() or not answer.strip():
+        return -1
+    now = time.time()
+    # First review tomorrow by default
+    next_review = now + _INTERVALS_DAYS[0] * 86400
+    with _connect() as conn:
+        cur = conn.execute(
+            "INSERT INTO entries (created_at, app_key, window_title, question, "
+            "answer, provider, model, streak, next_review_at, tags) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+            (now, app_key, window_title, question.strip(), answer.strip(),
+             provider, model, next_review, tags),
+        )
+        return cur.lastrowid
+
+
+# ─── Query helpers ────────────────────────────────────────────────────────────
+
+def entries_since(seconds_ago: float) -> list[dict]:
+    cutoff = time.time() - seconds_ago
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM entries WHERE created_at >= ? ORDER BY created_at DESC",
+            (cutoff,),
+        ).fetchall()
+        cols = [d[0] for d in conn.execute("PRAGMA table_info(entries)").fetchall()]
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(entries)").fetchall()]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def entries_today() -> list[dict]:
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    return entries_since(time.time() - today_start.timestamp())
+
+
+def entries_this_week() -> list[dict]:
+    return entries_since(7 * 86400)
+
