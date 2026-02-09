@@ -50,3 +50,69 @@ class AmbientListener:
       3. recording buffer (recording): full PCM buffer returned on stop_recording()
     """
 
+    def __init__(
+        self,
+        on_level: Callable[[float], None],
+        on_wake: Callable[[], None],
+        device: Optional[int] = None,
+    ):
+        self._on_level = on_level
+        self._on_wake = on_wake
+        self._device = device       # None = system default input device
+        self._stream_rate = SAMPLE_RATE   # actual rate the stream opens at
+
+        self._mode: Mode = Mode.STANDBY
+        self._stream: Optional[sd.InputStream] = None
+        self._running = False
+
+        # Rolling pre-roll ring buffer (small)
+        self._preroll: list[np.ndarray] = []
+        # Current speech segment buffer (for wake-word transcription)
+        self._seg_buffer: list[np.ndarray] = []
+        self._seg_speech_blocks = 0
+        self._seg_silence_blocks = 0
+        self._in_segment = False
+
+        # Recording buffer (hotkey push-to-talk OR post-wake capture)
+        self._rec_buffer: list[bytes] = []
+
+        # Lazy tiny whisper for wake word
+        self._wake_model = None
+        self._wake_lock = threading.Lock()
+        self._wake_inflight = False
+
+        # Enable/disable toggle
+        self._wake_word_enabled = True
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def start(self):
+        if self._running:
+            return
+        self._running = True
+        try:
+            self._stream = sd.InputStream(
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                dtype="int16",
+                blocksize=FRAMES_PER_BLOCK,
+                callback=self._callback,
+                device=self._device,
+            )
+            self._stream_rate = SAMPLE_RATE
+        except Exception:
+            # Device doesn't support 16kHz directly — open at its native
+            # rate and resample every block to 16kHz for Whisper.
+            info = sd.query_devices(self._device, "input")
+            native_rate = int(info["default_samplerate"])
+            self._stream_rate = native_rate
+            self._stream = sd.InputStream(
+                samplerate=native_rate,
+                channels=1,
+                dtype="int16",
+                blocksize=int(native_rate * BLOCK_MS / 1000),
+                callback=self._callback,
+                device=self._device,
+            )
+        self._stream.start()
+
