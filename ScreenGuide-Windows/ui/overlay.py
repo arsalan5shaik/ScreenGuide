@@ -156,3 +156,55 @@ POINTER_PHRASES = (
     "click this!", "here it is!", "found it!",
 )
 
+# Teacher-pace pointing timings (seconds)
+# Flight duration scales with distance but stays slow enough to follow visually.
+FLY_DURATION_MIN = 1.6
+FLY_DURATION_MAX = 2.8
+DWELL_SECONDS    = 4.0    # sits on the element while the LLM explains
+RETURN_DURATION  = 1.4
+
+# Pointing state machine
+_PHASE_FOLLOW    = "follow"
+_PHASE_FLYING    = "flying"
+_PHASE_DWELLING  = "dwelling"
+_PHASE_RETURNING = "returning"
+
+
+class CursorOverlay(QWidget):
+
+    def __init__(self):
+        super().__init__()
+
+        # Spring follow state
+        self._display_pos = QPointF(0, 0)
+        self._vel = QPointF(0, 0)
+        self._mode: str = MODE_IDLE
+        self._audio_level: float = 0.0
+        self._phase: float = 0.0
+
+        # Pointing / speech bubble
+        self._locked_pos: Optional[QPointF] = None
+        self._bubble_text: str = ""
+        self._bubble_alpha: float = 0.0
+        self._bubble_scale: float = 0.5
+        self._rotation_deg: float = TRI_ROTATION_DEG
+
+        # Bezier flight state (teacher pace)
+        self._flight_phase: str = _PHASE_FOLLOW
+        self._fly_start_pos = QPointF(0, 0)
+        self._fly_end_pos   = QPointF(0, 0)
+        self._fly_control   = QPointF(0, 0)
+        self._fly_t0: float = 0.0
+        self._fly_duration: float = 1.8
+        self._flight_scale: float = 1.0
+        self._dwell_until: float = 0.0
+        # When True, dwell never expires — manager releases after TTS finishes
+        self._hold_dwell: bool = False
+
+        # Slow mode — doubles flight + dwell so ScreenGuide feels more like a teacher
+        self._slow_mode: bool = False
+
+        # Optional highlight ring around detected element (x, y, radius)
+        self._ring: Optional[tuple] = None
+        self._ring_phase: float = 0.0
+
