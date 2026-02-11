@@ -231,3 +231,54 @@ CLEAR_RE     = re.compile(r'\[CLEAR\]')
 CIRCLE_AT_RE    = re.compile(r'\[CIRCLE:@([^:\]]+?)' + _C + r'\]')
 UNDERLINE_AT_RE = re.compile(r'\[UNDERLINE:@([^:\]]+?)' + _C + r'\]')
 
+ANY_TAG_RE   = re.compile(
+    r'\[(?:POINT|ARROW|CIRCLE|UNDERLINE|LABEL|LINE|RECT|POLY|TEXT|ANGLE|CLEAR)'
+    r'(?::[^\]]*)?\]'
+)
+ANY_PARTIAL_RE = re.compile(r'\[[A-Z]{0,9}(?::[^\]]*)?$')
+
+# Questions that ask ScreenGuide to locate / click UI elements — triggers the
+# Computer Use element locator when Claude is the provider.
+POINT_TRIGGER_RE = re.compile(
+    r"\b(where\s+(is|do|can)|how\s+do\s+i\s+(click|find|open|access|use)|"
+    r"point\s+(at|to)|show\s+me\s+(the|where)|click\s+(the|on)|find\s+the)\b",
+    re.IGNORECASE,
+)
+
+
+class CompanionManager(QObject):
+    """Thread-safe signals for Qt UI updates from async/audio threads."""
+
+    sig_state_changed       = pyqtSignal(object)          # AppState
+    sig_response_chunk      = pyqtSignal(str)
+    sig_response_done       = pyqtSignal(str)
+    sig_audio_level         = pyqtSignal(float)
+    sig_point_at            = pyqtSignal(float, float, str)
+    sig_point_hold          = pyqtSignal(bool)            # True → dwell forever until release
+    sig_point_release       = pyqtSignal()                # end dwell + fly buddy back
+    sig_error               = pyqtSignal(str)
+    sig_copilot_models_done = pyqtSignal(int)             # arg = model count
+    sig_models_refreshed    = pyqtSignal(str, int)        # (provider, count)
+    sig_ollama_models       = pyqtSignal(dict)            # {"vision": [...], "text": [...]}
+    sig_ollama_pull_status  = pyqtSignal(str, str)        # (model_name, status_msg)
+    sig_arrow               = pyqtSignal(float, float, float, float)
+    sig_circle              = pyqtSignal(float, float, float)
+    sig_underline           = pyqtSignal(float, float, float)
+    sig_label               = pyqtSignal(float, float, str)
+    sig_draw                = pyqtSignal(dict)            # generic teaching shape → overlay
+    sig_clear_drawings      = pyqtSignal()                # wipe all teaching shapes
+    sig_recording_state     = pyqtSignal(bool, str)       # (is_recording, output_dir)
+
+    def __init__(self):
+        super().__init__()
+        self._state: AppState = AppState.IDLE
+        self._history: List[Message] = []
+        self._current_model: Optional[str] = None
+        self._web_search_enabled = True
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+        # Providers (lazy)
+        self._llm: Optional[BaseLLMProvider] = None
+        self._stt = None
+        self._tts = None
+
