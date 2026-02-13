@@ -282,3 +282,53 @@ class CompanionManager(QObject):
         self._stt = None
         self._tts = None
 
+        # Current in-flight generation — tracked so Esc / stop can cancel
+        self._current_task: Optional[asyncio.Future] = None
+        self._cancel_flag = False
+
+        # Per-app memory: { window_title: [Message, ...] }
+        self._app_memory: dict[str, List[Message]] = {}
+        # Screenshots from the current turn — needed to map the LLM's
+        # normalized 0-1000 tag coordinates back to logical screen pixels.
+        self._screens_ctx: list = []
+        # Figures detected on screen this turn (normalized vertices) — used
+        # for prompt injection and for snapping sloppy stroke endpoints.
+        self._figures_ctx: list = []
+        # Current lesson: sequence of pending steps for multi-step tutorials
+        self._lesson_steps: list[str] = []
+        self._lesson_step_idx: int = 0
+        # Toggles
+        self._slow_mode = False
+        self._quiz_mode = False
+        self._privacy_guard = True
+        self._code_mode_auto = True       # auto-detect IDE windows
+        self._multilang = True             # auto-reply in user's language
+        self._journal_enabled = True       # log every Q&A to SQLite
+        self._ocr_enabled = True           # use Tesseract for fine print
+        self._last_response = ""           # for "say it again" voice command
+        self._attached_docs: list[tuple[str, str]] = []   # (filename, text)
+
+        # Optional subsystems (lazy-init to keep startup fast)
+        self._recorder: Optional[lesson_recorder.LessonRecorder] = None
+        self._collab: Optional[collab.CollabSession] = None
+        self._workflow: Optional[workflow_capture.WorkflowCapture] = None
+
+        # Load user-created skills from skills/ + ~/.screenguide/skills/
+        try:
+            skills_pkg.load_all()
+        except Exception:
+            pass
+
+        # Always-on ambient listener
+        self._listener = AmbientListener(
+            on_level=self._handle_level,
+            on_wake=self._handle_wake,
+            device=cfg.mic_device_index,
+        )
+
+        # Background asyncio loop
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
+
+    # ── Lifecycle ─────────────────────────────────────────────────────────────
+
