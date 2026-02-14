@@ -55,3 +55,53 @@ class OpenAIAPI {
     ) async throws -> (text: String, duration: TimeInterval) {
         let startTime = Date()
 
+        // Build request
+        var request = URLRequest(url: apiURL)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Build messages array
+        var messages: [[String: Any]] = []
+
+        // Add system message first
+        messages.append([
+            "role": "system",
+            "content": systemPrompt
+        ])
+
+        // Add conversation history
+        for (userPlaceholder, assistantResponse) in conversationHistory {
+            messages.append(["role": "user", "content": userPlaceholder])
+            messages.append(["role": "assistant", "content": assistantResponse])
+        }
+
+        // Build current message with all labeled images + prompt
+        var contentBlocks: [[String: Any]] = []
+        for image in images {
+            contentBlocks.append([
+                "type": "text",
+                "text": image.label
+            ])
+            contentBlocks.append([
+                "type": "image_url",
+                "image_url": [
+                    "url": "data:image/jpeg;base64,\(image.data.base64EncodedString())"
+                ]
+            ])
+        }
+        contentBlocks.append([
+            "type": "text",
+            "text": userPrompt
+        ])
+        messages.append(["role": "user", "content": contentBlocks])
+
+        // Build request body
+        let body: [String: Any] = [
+            "model": model,
+            // `max_tokens` is deprecated/incompatible for some newer OpenAI models.
+            "max_completion_tokens": 600,
+            "messages": messages
+        ]
+
