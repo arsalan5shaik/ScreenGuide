@@ -107,3 +107,54 @@ class GlobalHotkeyMonitor:
             else:
                 self._down.discard(tok)
 
+            if not self._held:
+                # Engage when every needed token is down (own tracking, with
+                # is_pressed as a safety net for events we may have missed).
+                if all(t in self._down or _is_down(t) for t in self._need):
+                    self._held = True
+                    if self._has_win:
+                        self._suppress_start_menu()
+                    self._on_press()
+            else:
+                # Release when any needed token is genuinely up.
+                if any(t not in self._down and not _is_down(t)
+                       for t in self._need):
+                    self._held = False
+                    self._on_release()
+        except Exception:
+            pass  # never let a callback error kill the keyboard hook
+
+    @staticmethod
+    def _suppress_start_menu():
+        """Inject a dummy key while Win is held so its release is a no-op."""
+        try:
+            keyboard.press_and_release("f24")
+        except Exception:
+            pass
+
+    # ── Classic terminal-key mode ─────────────────────────────────────────────
+
+    def _modifiers_held(self) -> bool:
+        return all(_is_down(m) for m in self._parts[:-1])
+
+    def _handle_press(self, event):
+        if not self._held and self._modifiers_held():
+            self._held = True
+            if self._has_win:
+                self._suppress_start_menu()
+            self._on_press()
+
+    def _handle_release(self, event):
+        if self._held:
+            self._held = False
+            self._on_release()
+
+    def stop(self):
+        if self._hook_handle is not None:
+            try:
+                keyboard.unhook(self._hook_handle)
+            except Exception:
+                pass
+            self._hook_handle = None
+        keyboard.unhook_all()
+
