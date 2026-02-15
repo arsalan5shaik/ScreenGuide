@@ -208,3 +208,54 @@ class CursorOverlay(QWidget):
         self._ring: Optional[tuple] = None
         self._ring_phase: float = 0.0
 
+        # Teaching annotations — list of shape dicts the overlay paints each
+        # tick. Shapes animate in sequentially (progressive strokes) and
+        # persist until clear_annotations() — a lesson stays on screen while
+        # the student studies it.
+        self._annotations: list[dict] = []
+        self._draw_queue_end: float = 0.0   # when the last queued stroke finishes
+        self._last_tip = None               # pen position held between strokes
+
+        # Thinking spinner phase
+        self._spin_phase: float = 0.0
+
+        # Transparent click-through, covers all monitors
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowTransparentForInput
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self._cover_all_monitors()
+
+        # Seed position so we don't flash at (0, 0)
+        qp = QCursor.pos()
+        self._display_pos = QPointF(qp.x() + OFFSET_X, qp.y() + OFFSET_Y)
+
+        # 60 FPS
+        self._tick_timer = QTimer(self)
+        self._tick_timer.timeout.connect(self._tick)
+        self._tick_timer.start(16)
+
+        # Release bubble / pointing
+        self._lock_timer = QTimer(self)
+        self._lock_timer.setSingleShot(True)
+        self._lock_timer.timeout.connect(self._release_lock)
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def set_mode(self, mode: str):
+        self._mode = mode
+
+    def set_audio_level(self, rms: float):
+        # Match Swift easing: eased = pow(min(rms*2.85, 1), 0.76)
+        norm = max(rms - 0.008, 0.0)
+        eased = min(norm * 2.85, 1.0) ** 0.76
+        self._audio_level = self._audio_level * 0.55 + eased * 0.45
+
+    def point_at(self, x: float, y: float, label: str = ""):
+        """Fly to an on-screen target at teacher pace, dwell, then fly back.
+
