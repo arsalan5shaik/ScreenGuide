@@ -48,3 +48,12 @@ def run_ocr(jpeg_bytes: bytes) -> str:
     except Exception:
         return ""
 
+
+def format_for_prompt(text: str) -> str:
+    if not text.strip():
+        return ""
+    return (
+        f"\n\n[OCR-EXTRACTED TEXT FROM SCREEN]\n{text[:8000]}\n"
+        "Use the OCR text above when quoting exact strings the user is asking "
+        "about. The screenshot may be blurry; OCR is more reliable for fine print."
+    )
