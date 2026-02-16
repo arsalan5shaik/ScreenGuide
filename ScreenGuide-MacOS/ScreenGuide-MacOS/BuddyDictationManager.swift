@@ -154,3 +154,53 @@ enum BuddyPushToTalkShortcut {
         }
     }
 
+    private static func shortcutTransition(
+        for shortcutEventType: ShortcutEventType,
+        keyCode: UInt16,
+        modifierFlags: NSEvent.ModifierFlags,
+        wasShortcutPreviouslyPressed: Bool
+    ) -> ShortcutTransition {
+        if let modifierOnlyFlags = currentShortcutOption.modifierOnlyFlags {
+            guard shortcutEventType == .flagsChanged else { return .none }
+
+            let isShortcutCurrentlyPressed = modifierFlags.contains(modifierOnlyFlags)
+
+            if isShortcutCurrentlyPressed && !wasShortcutPreviouslyPressed {
+                return .pressed
+            }
+
+            if !isShortcutCurrentlyPressed && wasShortcutPreviouslyPressed {
+                return .released
+            }
+
+            return .none
+        }
+
+        guard let pushToTalkModifierFlags = currentShortcutOption.spaceShortcutModifierFlags else {
+            return .none
+        }
+
+        let matchesModifierFlags = modifierFlags.isSuperset(of: pushToTalkModifierFlags)
+
+        if shortcutEventType == .keyDown
+            && keyCode == pushToTalkKeyCode
+            && matchesModifierFlags
+            && !wasShortcutPreviouslyPressed {
+            return .pressed
+        }
+
+        if shortcutEventType == .keyUp
+            && keyCode == pushToTalkKeyCode
+            && wasShortcutPreviouslyPressed {
+            return .released
+        }
+
+        return .none
+    }
+}
+
+enum BuddyDictationPermissionProblem {
+    case microphoneAccessDenied
+    case speechRecognitionDenied
+}
+
