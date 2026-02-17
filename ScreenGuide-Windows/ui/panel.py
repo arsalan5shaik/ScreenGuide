@@ -216,3 +216,68 @@ class CompanionPanel(QWidget):
         header.addWidget(self._min_btn)
         root.addLayout(header)
 
+        # Divider
+        div = QFrame()
+        div.setFrameShape(QFrame.Shape.HLine)
+        div.setStyleSheet("color: rgba(60,60,75,180);")
+        root.addWidget(div)
+
+        # Status row
+        self._status_dot = QLabel("●")
+        self._status_dot.setStyleSheet(f"color: rgb({STATE_IDLE.red()},{STATE_IDLE.green()},{STATE_IDLE.blue()}); font-size: 10px;")
+        self._status_label = QLabel(STATE_LABELS[AppState.IDLE])
+        self._status_label.setObjectName("status")
+        self._status_label.setFont(FONT_STATUS)
+        status_row = QHBoxLayout()
+        status_row.addWidget(self._status_dot)
+        status_row.addWidget(self._status_label)
+        status_row.addStretch()
+        root.addLayout(status_row)
+
+        # Waveform
+        self._waveform = WaveformWidget()
+        self._waveform.setVisible(False)
+        root.addWidget(self._waveform)
+
+        # Response area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._response_label = QLabel()
+        self._response_label.setObjectName("response")
+        self._response_label.setFont(FONT_RESPONSE)
+        self._response_label.setWordWrap(True)
+        self._response_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self._response_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._response_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        scroll.setWidget(self._response_label)
+        root.addWidget(scroll, stretch=1)
+
+        # Push-to-talk button
+        self._ptt_btn = QPushButton(f"Say 'ScreenGuide' or hold {_hotkey_label()}")
+        self._ptt_btn.setObjectName("hotkey_btn")
+        self._ptt_btn.setFont(FONT_LABEL)
+        self._ptt_btn.setFixedHeight(44)
+        root.addWidget(self._ptt_btn)
+
+        # Footer: model selector + provider info
+        footer = QHBoxLayout()
+        lbl = QLabel("Model:")
+        lbl.setFont(FONT_LABEL)
+        lbl.setStyleSheet("color: rgb(100,100,120); font-size: 11px;")
+        self._model_combo = QComboBox()
+        self._model_combo.setStyleSheet(
+            "background: rgba(40,40,50,200); border: 1px solid rgba(60,60,75,180);"
+            "border-radius: 6px; color: rgb(200,200,215); padding: 2px 6px; font-size: 11px;"
+        )
+        self._populate_models()
+        # Emit the model id (stored in userData), not the display label
+        self._model_combo.currentIndexChanged.connect(
+            lambda _idx: self.on_model_changed.emit(
+                self._model_combo.currentData() or self._model_combo.currentText()
+            )
+        )
+        footer.addWidget(lbl)
+        footer.addWidget(self._model_combo, stretch=1)
+        root.addLayout(footer)
+
