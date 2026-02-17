@@ -103,3 +103,19 @@ enum ScreenGuideAnalytics {
         ])
     }
 
+    // MARK: - Errors
+
+    /// An error occurred during the AI response pipeline.
+    static func trackResponseError(error: String) {
+        PostHogSDK.shared.capture("response_error", properties: [
+            "error": error
+        ])
+    }
+
+    /// An error occurred during TTS playback.
+    static func trackTTSError(error: String) {
+        PostHogSDK.shared.capture("tts_error", properties: [
+            "error": error
+        ])
+    }
+}
