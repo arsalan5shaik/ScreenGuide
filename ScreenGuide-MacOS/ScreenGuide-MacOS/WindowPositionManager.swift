@@ -57,3 +57,62 @@ class WindowPositionManager {
             openAccessibilitySettings()
         }
 
+        return presentationDestination
+    }
+
+    /// Opens System Settings to the Accessibility pane.
+    static func openAccessibilitySettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    /// Reveals the running app bundle in Finder so the user can drag it into
+    /// the Accessibility list if it doesn't appear automatically.
+    static func revealAppInFinder() {
+        guard let appURL = Bundle.main.bundleURL as URL? else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([appURL])
+    }
+
+    // MARK: - Screen Recording Permission
+
+    /// Returns true if Screen Recording permission is granted.
+    static func hasScreenRecordingPermission() -> Bool {
+        let hasScreenRecordingPermissionNow = CGPreflightScreenCaptureAccess()
+        if hasScreenRecordingPermissionNow {
+            UserDefaults.standard.set(true, forKey: hasPreviouslyConfirmedScreenRecordingPermissionUserDefaultsKey)
+        }
+        return hasScreenRecordingPermissionNow
+    }
+
+    /// Returns true when the app should proceed with session launch without showing
+    /// the permission gate again. This intentionally falls back to the last known
+    /// granted state because CGPreflightScreenCaptureAccess() can sometimes return a
+    /// false negative even though the user has already approved the app.
+    static func shouldTreatScreenRecordingPermissionAsGrantedForSessionLaunch() -> Bool {
+        shouldTreatScreenRecordingPermissionAsGrantedForSessionLaunch(
+            hasScreenRecordingPermissionNow: hasScreenRecordingPermission(),
+            hasPreviouslyConfirmedScreenRecordingPermission: UserDefaults.standard.bool(forKey: hasPreviouslyConfirmedScreenRecordingPermissionUserDefaultsKey)
+        )
+    }
+
+    static func shouldTreatScreenRecordingPermissionAsGrantedForSessionLaunch(
+        hasScreenRecordingPermissionNow: Bool,
+        hasPreviouslyConfirmedScreenRecordingPermission: Bool
+    ) -> Bool {
+        hasScreenRecordingPermissionNow || hasPreviouslyConfirmedScreenRecordingPermission
+    }
+
+    static func clearPreviouslyConfirmedScreenRecordingPermission() {
+        UserDefaults.standard.removeObject(forKey: hasPreviouslyConfirmedScreenRecordingPermissionUserDefaultsKey)
+    }
+
+    /// Prompts the system dialog for Screen Recording permission.
+    /// Uses the system prompt once, then opens System Settings on later attempts so
+    /// the user never gets the prompt and the Settings pane at the same time.
+    @discardableResult
+    static func requestScreenRecordingPermission() -> PermissionRequestPresentationDestination {
+        let presentationDestination = permissionRequestPresentationDestination(
+            hasPermissionNow: hasScreenRecordingPermission(),
+            hasAttemptedSystemPrompt: hasAttemptedScreenRecordingSystemPromptDuringCurrentLaunch
+        )
+
