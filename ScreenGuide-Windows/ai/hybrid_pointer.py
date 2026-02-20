@@ -105,3 +105,56 @@ def _find_via_uia(query: str, min_score: float = 0.5) -> Optional[Target]:
         log.warning("uiautomation not installed — Tier 1 (UIA) disabled")
         return None
 
+    try:
+        # Get the focused (foreground) window — pointing is almost always
+        # for the active app, and walking the whole desktop is slow.
+        root = auto.GetForegroundControl()
+        if root is None:
+            root = auto.GetRootControl()
+    except Exception as e:
+        log.debug("UIA root lookup failed: %s", e)
+        return None
+
+    best: Optional[Tuple[float, "auto.Control"]] = None
+    # Bounded walk — UIA trees can be huge in Chrome/Electron
+    queue: List[Tuple["auto.Control", int]] = [(root, 0)]
+    visited = 0
+    MAX_NODES = 3500
+    MAX_DEPTH = 40
+
+    while queue and visited < MAX_NODES:
+        node, depth = queue.pop(0)
+        visited += 1
+        try:
+            name = node.Name or ""
+            ctrl_type = node.ControlTypeName or ""
+            rect = node.BoundingRectangle  # mss/uia returns Rect
+        except Exception:
+            continue
+        # Skip off-screen / zero-size
+        if not rect or rect.width() <= 0 or rect.height() <= 0:
+            pass
+        else:
+            score = _score_match(query, name, ctrl_type)
+            # Also try AutomationId and HelpText as backup match sources
+            if score < 0.85:
+                try:
+                    aid = getattr(node, "AutomationId", "") or ""
+                    if aid:
+                        score = max(score, _score_match(query, aid, ctrl_type) * 0.8)
+                except Exception:
+                    pass
+            if score >= min_score and (best is None or score > best[0]):
+                best = (score, node)
+
+        if depth < MAX_DEPTH:
+            try:
+                for child in node.GetChildren():
+                    queue.append((child, depth + 1))
+            except Exception:
+                continue
+
+    if not best:
+        log.debug("UIA: no match for %r (scanned %d nodes)", query, visited)
+        return None
+
