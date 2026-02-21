@@ -159,3 +159,21 @@ async def detect_element(
         cu_x = max(0.0, min(cu_x, tw))
         cu_y = max(0.0, min(cu_y, th))
 
+        # Stage 1: Computer-Use space → physical monitor pixels
+        # (skip the downscaled-JPEG step entirely — the ratio is the same)
+        px = cu_x / tw * physical_width
+        py = cu_y / th * physical_height
+
+        # Stage 2: physical monitor px → physical virtual-screen px
+        # (apply the monitor's origin offset so monitor-2 coords don't land
+        # on monitor-1)
+        vx = px + physical_left
+        vy = py + physical_top
+
+        # Stage 3: physical → logical (Qt cursor space)
+        scale = dpi_scale if dpi_scale > 0 else 1.0
+        lx = int(round(vx / scale))
+        ly = int(round(vy / scale))
+        return Detected(x=lx, y=ly, screen_index=screen_index)
+
+    return None
