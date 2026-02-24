@@ -48,3 +48,53 @@ async def search(query: str, max_results: int = MAX_PAGES) -> str:
         except Exception:
             pass  # fall through to free path
 
+    return await _free_deep_search(query, max_results)
+
+
+def build_search_context(results: str) -> str:
+    if not results.strip():
+        return ""
+    return (
+        "\n\n[Web Search Results — ground factual / recent claims in these. "
+        "Cite source numbers like [1] when you use them.]\n"
+        + results
+        + "\n[End of search results]\n"
+    )
+
+
+# ── Tavily (premium path) ─────────────────────────────────────────────────────
+
+async def _tavily(query: str, max_results: int) -> str:
+    url = "https://api.tavily.com/search"
+    payload = {
+        "api_key": cfg.tavily_api_key,
+        "query": query,
+        "search_depth": "advanced",
+        "max_results": max_results,
+        "include_answer": True,
+        "include_raw_content": True,
+    }
+    async with httpx.AsyncClient(timeout=12) as client:
+        r = await client.post(url, json=payload)
+        r.raise_for_status()
+        data = r.json()
+
+    parts: list[str] = []
+    if data.get("answer"):
+        parts.append(f"Summary: {data['answer']}")
+
+    for i, result in enumerate(data.get("results", []), 1):
+        title = result.get("title", "").strip()
+        url_str = result.get("url", "")
+        body = (result.get("raw_content") or result.get("content") or "").strip()
+        body = body[:PAGE_CHAR_BUDGET]
+        parts.append(f"[{i}] {title} — {url_str}\n{body}")
+
+    return _truncate("\n\n".join(parts), OVERALL_CHAR_BUDGET)
+
+
+# ── Free deep search: DuckDuckGo HTML + page fetch ────────────────────────────
+
+async def _free_deep_search(query: str, max_results: int) -> str:
+    sub_queries = _expand_query(query)
+
