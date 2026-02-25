@@ -52,3 +52,53 @@ def decode_mp3_to_pcm(mp3_bytes: bytes) -> tuple[np.ndarray, int]:
             arr = rf.to_ndarray().flatten()
             chunks.append(arr)
 
+    container.close()
+
+    if not chunks:
+        return np.zeros(0, dtype=np.float32), sample_rate
+
+    pcm = np.concatenate(chunks).astype(np.float32)
+    return pcm, sample_rate
+
+
+def _blocking_play_chunked(pcm: np.ndarray, sr: int) -> None:
+    """Play PCM through an OutputStream, polling _stop_event between blocks
+    so cancellation takes effect within ~50 ms instead of 'when the buffer
+    runs out'."""
+    if pcm.size == 0:
+        return
+
+    block = max(1, int(sr * 0.05))    # 50 ms blocks
+    pcm = pcm.reshape(-1, 1) if pcm.ndim == 1 else pcm
+
+    try:
+        with sd.OutputStream(samplerate=sr, channels=1, dtype="float32") as stream:
+            i = 0
+            while i < len(pcm):
+                if _stop_event.is_set():
+                    return
+                end = min(i + block, len(pcm))
+                stream.write(pcm[i:end])
+                i = end
+    except Exception:
+        # Fallback: play everything in one shot. Less responsive to stop, but
+        # never silently fails on weird devices.
+        try:
+            sd.play(pcm.flatten(), samplerate=sr)
+            # Poll the stop event during wait
+            while sd.get_stream().active:
+                if _stop_event.is_set():
+                    sd.stop()
+                    return
+                sd.sleep(50)
+        except Exception:
+            pass
+
+
+async def play_mp3_async(mp3_bytes: bytes) -> None:
+    """Decode and play MP3 audio asynchronously. Cancellable via stop_audio()."""
+    if not mp3_bytes:
+        return
+
+    _arm_audio()
+
