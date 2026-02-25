@@ -115,3 +115,61 @@ def entries_today() -> list[dict]:
 def entries_this_week() -> list[dict]:
     return entries_since(7 * 86400)
 
+
+def entries_all() -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM entries ORDER BY created_at DESC LIMIT 500"
+        ).fetchall()
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(entries)").fetchall()]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def due_for_review(limit: int = 5) -> list[dict]:
+    """Spaced-repetition: pull entries whose `next_review_at` is in the past."""
+    now = time.time()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM entries WHERE next_review_at IS NOT NULL AND "
+            "next_review_at <= ? ORDER BY next_review_at ASC LIMIT ?",
+            (now, limit),
+        ).fetchall()
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(entries)").fetchall()]
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def mark_reviewed(entry_id: int, correct: bool) -> None:
+    """Update streak + next review interval."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT streak FROM entries WHERE id = ?", (entry_id,)
+        ).fetchone()
+        if not row:
+            return
+        streak = row[0] or 0
+        if correct:
+            streak += 1
+            interval_days = _INTERVALS_DAYS[min(streak, len(_INTERVALS_DAYS) - 1)]
+        else:
+            streak = 0
+            interval_days = 1
+        next_review = time.time() + interval_days * 86400
+        conn.execute(
+            "UPDATE entries SET streak = ?, next_review_at = ? WHERE id = ?",
+            (streak, next_review, entry_id),
+        )
+
+
+# ─── Summarisers — used for "what did I learn today" voice replies ────────────
+
+def summarise(entries: list[dict], header: str = "") -> str:
+    if not entries:
+        return f"{header}Nothing logged yet."
+    lines = [header.strip()] if header else []
+    for e in entries[:10]:
+        when = datetime.fromtimestamp(e["created_at"]).strftime("%I:%M %p")
+        q = e["question"][:80]
+        lines.append(f"• {when} — {q}")
+    if len(entries) > 10:
+        lines.append(f"…and {len(entries) - 10} more.")
+    return "\n".join(lines)
