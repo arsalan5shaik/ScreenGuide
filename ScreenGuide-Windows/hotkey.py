@@ -158,3 +158,18 @@ class GlobalHotkeyMonitor:
             self._hook_handle = None
         keyboard.unhook_all()
 
+
+class StopHotkey:
+    """A global key that cancels the current generation (default: Esc).
+
+    Only fires while ScreenGuide is actively talking/thinking — the callback itself
+    should no-op when ScreenGuide is idle, so this can be left always-on without
+    stealing Esc from other apps' UX.
+    """
+
+    def __init__(self, on_stop: Callable[[], None], key: str = "esc"):
+        self._on_stop = on_stop
+        self._key = key
+
+    def start(self):
+        keyboard.add_hotkey(self._key, self._on_stop, suppress=False)
