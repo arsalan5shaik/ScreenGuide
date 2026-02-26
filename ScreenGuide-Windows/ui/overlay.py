@@ -259,3 +259,67 @@ class CursorOverlay(QWidget):
     def point_at(self, x: float, y: float, label: str = ""):
         """Fly to an on-screen target at teacher pace, dwell, then fly back.
 
+        (x, y) is the EXACT pixel of the UI element in logical screen space
+        (same space Qt's QCursor.pos() uses). The buddy lands with the tip of
+        its triangle on that pixel — the highlight ring marks the exact spot."""
+        # Buddy's tip should sit on the target pixel. The triangle is drawn
+        # centred on _display_pos, so we just plant _display_pos there.
+        self._locked_pos = QPointF(x, y)
+        self._bubble_text = label or random.choice(POINTER_PHRASES)
+        self._bubble_scale = 0.5
+        self._bubble_alpha = 0.0
+        # Halo ring around the actual target pixel
+        self._ring = (x, y, 26.0)
+        self._ring_phase = 0.0
+        self._lock_timer.stop()   # dwell controlled by phase machine, not timer
+        self._begin_flight(self._display_pos, self._locked_pos, _PHASE_FLYING)
+
+    def set_slow_mode(self, enabled: bool):
+        """Doubles flight + dwell duration so students can track the motion."""
+        self._slow_mode = enabled
+
+    def set_point_hold(self, hold: bool):
+        """Called by manager when TTS starts (True) / ends (False).
+        While held, dwell never auto-expires — the buddy stays on the element
+        the entire time ScreenGuide speaks."""
+        self._hold_dwell = hold
+        if hold and self._flight_phase == _PHASE_DWELLING:
+            self._dwell_until = float("inf")
+
+    def release_point(self):
+        """Manager signals that TTS is done — fly buddy back to cursor now.
+        Teaching drawings are NOT cleared here — they persist so the student
+        can keep studying them; the manager clears them on the next query."""
+        self._hold_dwell = False
+        if self._flight_phase == _PHASE_DWELLING:
+            self._dwell_until = 0.0   # expires this tick → triggers return
+        # Fade ring on next paint
+        self._ring = None
+
+    # ── Teaching annotations ─────────────────────────────────────────────────
+
+    def add_shape(self, shape: dict):
+        """Queue a shape for progressive drawing. Logical screen coords.
+
+        shape: {"kind": "line"|"arrow"|"circle"|"rect"|"poly"|"text"|
+                        "underline"|"angle",
+                ...kind-specific fields...,
+                "color": palette name (optional),
+                "ttl": seconds or None (None = persist until cleared)}
+
+        Shapes animate in arrival order: each waits for the previous stroke
+        to finish, like a hand drawing on a board.
+        """
+        now = time.monotonic()
+        start = max(now, self._draw_queue_end)
+        shape = dict(shape)
+        # Draw at hand speed — long strokes take visibly longer
+        dur = _shape_length(shape) / STROKE_SPEED_PX_S
+        dur = max(SHAPE_DRAW_MIN_S, min(SHAPE_DRAW_MAX_S, dur))
+        shape["start"] = start
+        shape["dur"] = dur
+        shape.setdefault("color", "blue")
+        shape.setdefault("ttl", None)
+        self._draw_queue_end = start + dur + SHAPE_GAP_SECONDS
+        self._annotations.append(shape)
+
