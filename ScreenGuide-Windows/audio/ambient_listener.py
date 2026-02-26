@@ -116,3 +116,53 @@ class AmbientListener:
             )
         self._stream.start()
 
+    def stop(self):
+        self._running = False
+        if self._stream:
+            try:
+                self._stream.stop()
+                self._stream.close()
+            except Exception:
+                pass
+            self._stream = None
+
+    def start_recording(self) -> None:
+        """Switch to RECORDING mode; all audio buffered for STT."""
+        self._rec_buffer = []
+        self._mode = Mode.RECORDING
+
+    def stop_recording(self) -> bytes:
+        """Return buffered PCM16 bytes and resume standby."""
+        pcm = b"".join(self._rec_buffer)
+        self._rec_buffer = []
+        self._mode = Mode.STANDBY
+        self._reset_segment()
+        return pcm
+
+    def set_wake_word_enabled(self, enabled: bool):
+        self._wake_word_enabled = enabled
+
+    @property
+    def wake_word_enabled(self) -> bool:
+        return self._wake_word_enabled
+
+    # ── Audio callback ────────────────────────────────────────────────────────
+
+    def _callback(self, indata: np.ndarray, frames: int, time_info, status):
+        if not self._running:
+            return
+
+        pcm_int16 = indata[:, 0] if indata.ndim == 2 else indata
+        if self._stream_rate != SAMPLE_RATE:
+            pcm_int16 = np.frombuffer(
+                resample_pcm(pcm_int16.tobytes(), self._stream_rate, SAMPLE_RATE),
+                dtype=np.int16,
+            )
+        pcm_float = pcm_int16.astype(np.float32) / 32768.0
+        rms = float(np.sqrt(np.mean(pcm_float ** 2)))
+        self._on_level(rms)
+
+        if self._mode == Mode.RECORDING:
+            self._rec_buffer.append(pcm_int16.tobytes())
+            return
+
