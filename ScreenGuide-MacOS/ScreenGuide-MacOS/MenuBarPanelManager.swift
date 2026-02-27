@@ -100,3 +100,55 @@ final class MenuBarPanelManager: NSObject {
         path.line(to: rotate(bottomRight))
         path.close()
 
+        NSColor.black.setFill()
+        path.fill()
+
+        image.unlockFocus()
+        return image
+    }
+
+    /// Opens the panel automatically on app launch so the user sees
+    /// permissions and the start button right away.
+    func showPanelOnLaunch() {
+        // Small delay so the status item has time to appear in the menu bar
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            self.showPanel()
+        }
+    }
+
+    @objc private func statusItemClicked() {
+        if let panel, panel.isVisible {
+            hidePanel()
+        } else {
+            showPanel()
+        }
+    }
+
+    // MARK: - Panel Lifecycle
+
+    private func showPanel() {
+        if panel == nil {
+            createPanel()
+        }
+
+        positionPanelBelowStatusItem()
+
+        panel?.makeKeyAndOrderFront(nil)
+        panel?.orderFrontRegardless()
+        installClickOutsideMonitor()
+    }
+
+    private func hidePanel() {
+        panel?.orderOut(nil)
+        removeClickOutsideMonitor()
+    }
+
+    private func createPanel() {
+        let companionPanelView = CompanionPanelView(companionManager: companionManager)
+            .frame(width: panelWidth)
+
+        let hostingView = NSHostingView(rootView: companionPanelView)
+        hostingView.frame = NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight)
+        hostingView.wantsLayer = true
+        hostingView.layer?.backgroundColor = .clear
+
