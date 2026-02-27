@@ -48,3 +48,54 @@ export default {
   },
 };
 
+async function handleChat(request: Request, env: Env): Promise<Response> {
+  const body = await request.text();
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "x-api-key": env.ANTHROPIC_API_KEY,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body,
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.error(`[/chat] Anthropic API error ${response.status}: ${errorBody}`);
+    return new Response(errorBody, {
+      status: response.status,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    headers: {
+      "content-type": response.headers.get("content-type") || "text/event-stream",
+      "cache-control": "no-cache",
+    },
+  });
+}
+
+async function handleTranscribeToken(env: Env): Promise<Response> {
+  const response = await fetch(
+    "https://streaming.assemblyai.com/v3/token?expires_in_seconds=480",
+    {
+      method: "GET",
+      headers: {
+        authorization: env.ASSEMBLYAI_API_KEY,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    const errorBody = await response.text();
+    console.error(`[/transcribe-token] AssemblyAI token error ${response.status}: ${errorBody}`);
+    return new Response(errorBody, {
+      status: response.status,
+      headers: { "content-type": "application/json" },
+    });
+  }
+
