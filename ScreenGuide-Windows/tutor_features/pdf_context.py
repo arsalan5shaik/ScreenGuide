@@ -56,3 +56,33 @@ def extract_text(path: str | Path) -> str:
         except Exception as e:
             return f"(failed to read PDF: {e})"
 
+    if suf in (".docx",):
+        try:
+            from docx import Document   # type: ignore
+        except ImportError:
+            return f"(install `python-docx` to read {p.name})"
+        try:
+            doc = Document(str(p))
+            text = "\n".join(par.text for par in doc.paragraphs if par.text.strip())
+            return text[:MAX_CHARS_PER_DOC]
+        except Exception as e:
+            return f"(failed to read DOCX: {e})"
+
+    # Unknown file type — return a summary
+    try:
+        size_kb = p.stat().st_size / 1024
+        return f"[Unsupported file type: {suf or 'no extension'}, {size_kb:.0f} KB]"
+    except Exception:
+        return ""
+
+
+def format_for_prompt(filename: str, text: str) -> str:
+    """Wrap extracted text so the LLM knows it's a user-attached document."""
+    if not text.strip():
+        return ""
+    return (
+        f"\n\n[USER-ATTACHED DOCUMENT: {filename}]\n"
+        f"--- begin document ---\n{text}\n--- end document ---\n"
+        "When the user asks about 'this PDF' / 'my notes' / 'page X', refer to "
+        "the document above. Cite page numbers when present."
+    )
