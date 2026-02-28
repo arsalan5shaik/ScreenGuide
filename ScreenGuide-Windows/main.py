@@ -165,3 +165,62 @@ def main():
     tray.on_toggle_journal.connect(manager.set_journal)
     tray.on_toggle_ocr.connect(manager.set_ocr_enabled)
 
+    # Lesson recording
+    def _record_start():
+        out = manager.start_recording()
+        tray.show_notification(
+            "Lesson Recording",
+            f"Recording to:\n{out}" if out else
+            "Failed — install imageio[ffmpeg]: pip install imageio imageio-ffmpeg"
+        )
+    def _record_stop():
+        out = manager.stop_recording()
+        if out:
+            tray.show_notification("Lesson saved", out)
+    tray.on_record_start.connect(_record_start)
+    tray.on_record_stop.connect(_record_stop)
+    manager.sig_recording_state.connect(
+        lambda on, _path: tray.set_recording_state(on)
+    )
+
+    # Workflow capture
+    def _wf_start():
+        ok = manager.workflow_start()
+        tray.show_notification(
+            "Workflow Capture",
+            "Recording your clicks + keys. Stop from tray when done."
+            if ok else "Install pynput: pip install pynput"
+        )
+    def _wf_stop():
+        summary = manager.workflow_stop()
+        if summary:
+            tray.show_notification(
+                "Workflow Captured",
+                "Sent to ScreenGuide as context. Ask: 'what did I just do?'"
+            )
+            # Stash as an attached doc so the next question sees it
+            manager._attached_docs.append(("recorded_workflow.txt", summary))
+    tray.on_workflow_start.connect(_wf_start)
+    tray.on_workflow_stop.connect(_wf_stop)
+
+    # Live collab
+    tray.on_collab_start.connect(manager.collab_start_host)
+    def _collab_join():
+        from PyQt6.QtWidgets import QInputDialog
+        code, ok = QInputDialog.getText(None, "Join Live Session",
+                                        "Enter 6-character session code:")
+        if ok and code:
+            manager.collab_join(code.strip())
+    tray.on_collab_join.connect(_collab_join)
+
+    # Journal folder
+    def _open_journal():
+        import os, subprocess
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        path = os.path.join(base, "ScreenGuide")
+        try:
+            os.startfile(path)
+        except Exception:
+            subprocess.Popen(["explorer", path])
+    tray.on_journal_open.connect(_open_journal)
+
