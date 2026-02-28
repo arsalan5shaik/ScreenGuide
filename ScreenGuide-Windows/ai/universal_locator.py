@@ -102,3 +102,63 @@ def _draw_grid(
         y = int(r * cell_h)
         draw.line([(0, y), (w, y)], fill=line_color, width=1)
 
+    # Cell number labels — pick a font size proportional to cell size
+    font_size = max(12, min(28, int(min(cell_w, cell_h) / 3.5)))
+    font = _load_font(font_size)
+    pad = 2
+
+    n = 1
+    for r in range(rows):
+        for c in range(cols):
+            cx = int(c * cell_w) + pad
+            cy = int(r * cell_h) + pad
+            label = str(n)
+            # Measure text
+            try:
+                bbox = draw.textbbox((cx, cy), label, font=font)
+                tw = bbox[2] - bbox[0]
+                th = bbox[3] - bbox[1]
+            except Exception:
+                tw, th = font_size * len(label) // 2, font_size
+            # Draw filled background pill behind the number
+            draw.rectangle(
+                [(cx - 1, cy - 1), (cx + tw + 4, cy + th + 4)],
+                fill=label_bg,
+            )
+            draw.text((cx + 2, cy), label, fill=label_fg, font=font)
+            n += 1
+
+    out = Image.alpha_composite(base, overlay).convert("RGB")
+    return out
+
+
+def _img_to_jpeg_b64(img: Image.Image, quality: int = 85) -> str:
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=quality)
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+# ─── LLM call ─────────────────────────────────────────────────────────────────
+
+_PARSE_RE = re.compile(r"\b(\d{1,3})\b")
+
+
+def _parse_cell_number(text: str, max_n: int) -> Optional[int]:
+    """Extract a cell number 1..max_n from a free-form LLM reply.
+
+    Strategy: prefer JSON-shaped answers, otherwise take the first integer
+    in range that appears in the reply. Tolerates the model rambling.
+    """
+    # Try JSON first
+    m = re.search(r"\{[^{}]*\}", text, flags=re.DOTALL)
+    if m:
+        try:
+            obj = json.loads(m.group(0))
+            for key in ("cell", "number", "n", "answer"):
+                if key in obj:
+                    n = int(obj[key])
+                    if 1 <= n <= max_n:
+                        return n
+        except Exception:
+            pass
+
