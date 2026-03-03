@@ -48,3 +48,54 @@ class WhisperCppSTT(BaseSTT):
                 "whisper.cpp not installed. Run:  pip install pywhispercpp"
             ) from e
 
+        self._Model = Model
+        self._model_name = model or DEFAULT_MODEL
+        self._model = None  # lazy — first transcribe loads it
+
+    def _load(self):
+        if self._model is None:
+            # n_threads = physical cores - 1 (leave one for the UI)
+            try:
+                cores = max(1, (os.cpu_count() or 4) - 1)
+            except Exception:
+                cores = 4
+            self._model = self._Model(
+                self._model_name,
+                n_threads=cores,
+                print_realtime=False,
+                print_progress=False,
+            )
+        return self._model
+
+    async def transcribe(self, pcm_bytes: bytes) -> str:
+        """Convert raw 16-bit mono PCM @ 16 kHz → text."""
+        if not pcm_bytes:
+            return ""
+        pcm_bytes = trim_silence(pcm_bytes)
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._sync_transcribe, pcm_bytes)
+
+    def _sync_transcribe(self, pcm_bytes: bytes) -> str:
+        # pcm16_to_wav applies noise-gate + auto-gain, then wraps as WAV —
+        # we only need the processed PCM back out, so unwrap the header.
+        wav_bytes = pcm16_to_wav(pcm_bytes)
+        pcm_bytes = wav_bytes[44:]  # strip standard 44-byte WAV header
+
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_path = tmp.name
+        try:
+            with wave.open(tmp_path, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)        # 16-bit
+                w.setframerate(16000)    # AmbientListener captures at 16 kHz
+                w.writeframes(pcm_bytes)
+            model = self._load()
+            lang = cfg.whisper_language or ""
+            segments = model.transcribe(tmp_path, language=lang)
+            return " ".join(s.text.strip() for s in segments).strip()
+        finally:
+            try:
+                Path(tmp_path).unlink()
+            except Exception:
+                pass
