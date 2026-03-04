@@ -107,3 +107,53 @@ struct BlueCursorView: View {
     let isFirstAppearance: Bool
     @ObservedObject var companionManager: CompanionManager
 
+    @State private var cursorPosition: CGPoint
+    @State private var isCursorOnThisScreen: Bool
+
+    init(screenFrame: CGRect, isFirstAppearance: Bool, companionManager: CompanionManager) {
+        self.screenFrame = screenFrame
+        self.isFirstAppearance = isFirstAppearance
+        self.companionManager = companionManager
+
+        // Seed the cursor position from the current mouse location so the
+        // buddy doesn't flash at (0,0) before onAppear fires.
+        let mouseLocation = NSEvent.mouseLocation
+        let localX = mouseLocation.x - screenFrame.origin.x
+        let localY = screenFrame.height - (mouseLocation.y - screenFrame.origin.y)
+        _cursorPosition = State(initialValue: CGPoint(x: localX + 35, y: localY + 25))
+        _isCursorOnThisScreen = State(initialValue: screenFrame.contains(mouseLocation))
+    }
+    @State private var timer: Timer?
+    @State private var welcomeText: String = ""
+    @State private var showWelcome: Bool = true
+    @State private var bubbleSize: CGSize = .zero
+    @State private var bubbleOpacity: Double = 1.0
+    @State private var cursorOpacity: Double = 0.0
+
+    // MARK: - Buddy Navigation State
+
+    /// The buddy's current behavioral mode (following cursor, navigating, or pointing).
+    @State private var buddyNavigationMode: BuddyNavigationMode = .followingCursor
+
+    /// The rotation angle of the triangle in degrees. Default is -35° (cursor-like).
+    /// Changes to face the direction of travel when navigating to a target.
+    @State private var triangleRotationDegrees: Double = -35.0
+
+    /// Speech bubble text shown when pointing at a detected element.
+    @State private var navigationBubbleText: String = ""
+    @State private var navigationBubbleOpacity: Double = 0.0
+    @State private var navigationBubbleSize: CGSize = .zero
+
+    /// The cursor position at the moment navigation started, used to detect
+    /// if the user moves the cursor enough to cancel the navigation.
+    @State private var cursorPositionWhenNavigationStarted: CGPoint = .zero
+
+    /// Timer driving the frame-by-frame bezier arc flight animation.
+    /// Invalidated when the flight completes, is canceled, or the view disappears.
+    @State private var navigationAnimationTimer: Timer?
+
+    /// Scale factor applied to the buddy triangle during flight. Grows to ~1.3x
+    /// at the midpoint of the arc and shrinks back to 1.0x on landing, creating
+    /// an energetic "swooping" feel.
+    @State private var buddyFlightScale: CGFloat = 1.0
+
