@@ -105,3 +105,45 @@ def detect_figures(base64_jpeg: str, max_figures: int = 4) -> List[Figure]:
         else:
             continue
 
+        seen.add(key)
+        verts = [_norm_pt(p[0][0], p[0][1]) for p in approx]
+        radius = int(round(math.sqrt(area / math.pi) / W * 1000)) if kind == "circle" else 0
+        figs.append(Figure(
+            kind=kind,
+            vertices=verts,
+            center=_norm_pt(cx, cy),
+            radius=radius,
+            bbox=(*_norm_pt(x, y), *_norm_pt(x + w, y + h)),
+        ))
+
+    # Largest figures first — those are what the user is looking at
+    figs.sort(key=lambda f: -(f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+    figs = figs[:max_figures]
+    if figs:
+        log.info("figure detect: %s", [(f.kind, f.vertices or f.center) for f in figs])
+    return figs
+
+
+def figures_prompt(figs: List[Figure]) -> str:
+    """Render detected figures as a prompt block the LLM copies coords from."""
+    if not figs:
+        return ""
+    lines = [
+        "\n\nDETECTED FIGURES (found by ScreenGuide's local vision, coordinates are "
+        "EXACT and already normalized 0-1000 — when teaching about one of "
+        "these, you MUST build your drawing tags from these vertices verbatim "
+        "instead of estimating):"
+    ]
+    for i, f in enumerate(figs, 1):
+        if f.kind == "circle":
+            lines.append(
+                f"  {i}. circle: center=({f.center[0]},{f.center[1]}), "
+                f"radius={f.radius}"
+            )
+        else:
+            vs = " ".join(f"({x},{y})" for x, y in f.vertices)
+            lines.append(f"  {i}. {f.kind}: vertices {vs}")
+    return "\n".join(lines) + "\n"
+
+
+__all__ = ["Figure", "detect_figures", "figures_prompt"]
