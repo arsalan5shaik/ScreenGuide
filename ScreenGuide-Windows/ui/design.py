@@ -95,3 +95,8 @@ QScrollBar::handle:vertical {{
 }}
 """
 
+WAVEFORM_QSS = """
+QWidget#waveform {
+    background: transparent;
+}
+"""
