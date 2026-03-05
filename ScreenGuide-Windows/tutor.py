@@ -1,0 +1,53 @@
+"""
+Tutor-layer helpers: active window detection, privacy masking, "next" detection,
+and locate-query classification. Kept out of companion_manager.py so the
+orchestrator stays readable.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import re
+from ctypes import wintypes
+
+
+# ── Active-window title (for per-app context memory) ─────────────────────────
+
+def active_window_title() -> str:
+    try:
+        u = ctypes.windll.user32
+        hwnd = u.GetForegroundWindow()
+        if not hwnd:
+            return ""
+        n = u.GetWindowTextLengthW(hwnd)
+        buf = ctypes.create_unicode_buffer(n + 1)
+        u.GetWindowTextW(hwnd, buf, n + 1)
+        return buf.value or ""
+    except Exception:
+        return ""
+
+
+def app_key(title: str) -> str:
+    """Reduce a noisy window title to a stable per-app key.
+
+    Examples:
+      "Premiere Pro - project.prproj"  -> "Premiere Pro"
+      "YouTube — Google Chrome"        -> "Google Chrome"
+      "VS Code — main.py"              -> "VS Code"
+    """
+    if not title:
+        return "desktop"
+    # Take the right-most app name chunk (usually after last "-" or "—")
+    parts = re.split(r"\s[-—–|]\s", title)
+    return (parts[-1] if parts else title).strip()[:48] or "desktop"
+
+
+# ── Locate-query classification ──────────────────────────────────────────────
+
+LOCATE_RE = re.compile(
+    r"\b(where\s+(is|do|can|should)|how\s+do\s+i\s+(click|find|open|access|use|get\s+to)|"
+    r"point\s+(at|to)|show\s+me\s+(the|where)|click\s+(the|on)|find\s+the|"
+    r"locate\s+the|highlight\s+the)\b",
+    re.IGNORECASE,
+)
+
