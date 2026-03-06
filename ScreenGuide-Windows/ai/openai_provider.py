@@ -55,3 +55,9 @@ class OpenAIProvider(BaseLLMProvider):
             if delta.content:
                 yield delta.content
 
+    async def health_check(self) -> bool:
+        try:
+            await self._client.models.list()
+            return True
+        except Exception:
+            return False
