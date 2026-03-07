@@ -152,3 +152,57 @@ final class MenuBarPanelManager: NSObject {
         hostingView.wantsLayer = true
         hostingView.layer?.backgroundColor = .clear
 
+        let menuBarPanel = KeyablePanel(
+            contentRect: NSRect(x: 0, y: 0, width: panelWidth, height: panelHeight),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+
+        menuBarPanel.isFloatingPanel = true
+        menuBarPanel.level = .floating
+        menuBarPanel.isOpaque = false
+        menuBarPanel.backgroundColor = .clear
+        menuBarPanel.hasShadow = false
+        menuBarPanel.hidesOnDeactivate = false
+        menuBarPanel.isExcludedFromWindowsMenu = true
+        menuBarPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        menuBarPanel.isMovableByWindowBackground = false
+        menuBarPanel.titleVisibility = .hidden
+        menuBarPanel.titlebarAppearsTransparent = true
+
+        menuBarPanel.contentView = hostingView
+        panel = menuBarPanel
+    }
+
+    private func positionPanelBelowStatusItem() {
+        guard let panel else { return }
+        guard let buttonWindow = statusItem?.button?.window else { return }
+
+        let statusItemFrame = buttonWindow.frame
+        let gapBelowMenuBar: CGFloat = 4
+
+        // Calculate the panel's content height from the hosting view's fitting size
+        // so the panel snugly wraps the SwiftUI content instead of using a fixed height.
+        let fittingSize = panel.contentView?.fittingSize ?? CGSize(width: panelWidth, height: panelHeight)
+        let actualPanelHeight = fittingSize.height
+
+        // Horizontally center the panel beneath the status item icon
+        let panelOriginX = statusItemFrame.midX - (panelWidth / 2)
+        let panelOriginY = statusItemFrame.minY - actualPanelHeight - gapBelowMenuBar
+
+        panel.setFrame(
+            NSRect(x: panelOriginX, y: panelOriginY, width: panelWidth, height: actualPanelHeight),
+            display: true
+        )
+    }
+
+    // MARK: - Click Outside Dismissal
+
+    /// Installs a global event monitor that hides the panel when the user clicks
+    /// anywhere outside it — the same transient dismissal behavior as NSPopover.
+    /// Uses a short delay so that system permission dialogs (triggered by Grant
+    /// buttons in the panel) don't immediately dismiss the panel when they appear.
+    private func installClickOutsideMonitor() {
+        removeClickOutsideMonitor()
+
