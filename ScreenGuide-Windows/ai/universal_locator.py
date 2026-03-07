@@ -162,3 +162,53 @@ def _parse_cell_number(text: str, max_n: int) -> Optional[int]:
         except Exception:
             pass
 
+    # Fallback: scan integers in order
+    for tok in _PARSE_RE.findall(text):
+        try:
+            n = int(tok)
+            if 1 <= n <= max_n:
+                return n
+        except ValueError:
+            continue
+
+    return None
+
+
+async def _ask_grid_pick(
+    llm: BaseLLMProvider,
+    img_b64: str,
+    target: str,
+    max_n: int,
+    model: str | None = None,
+) -> Optional[int]:
+    """Send an annotated image + question to the LLM and parse a cell number."""
+    prompt = (
+        f"You are looking at a screenshot with a red numbered grid overlay. "
+        f"Cells are numbered 1 to {max_n}, left-to-right, top-to-bottom.\n\n"
+        f'The user asked: "{target}"\n\n'
+        f"Identify the SINGLE numbered cell that most precisely contains the "
+        f"UI element the user is asking about (button, link, menu item, icon, "
+        f"text field, etc.).\n\n"
+        f'Respond with ONLY this JSON, nothing else:  {{"cell": <number>}}\n\n'
+        f"If there's no specific UI element to point at (purely conceptual "
+        f'question), respond exactly:  {{"cell": 0}}'
+    )
+
+    chunks: list[str] = []
+    try:
+        async for chunk in llm.stream_response(
+            user_text=prompt,
+            screenshots_b64=[img_b64],
+            history=[],
+            system_prompt=(
+                "You are a precise UI element locator. You ALWAYS answer with "
+                'a single JSON object of the form {"cell": <integer>}.'
+            ),
+            model=model,
+        ):
+            chunks.append(chunk)
+            if len("".join(chunks)) > 400:
+                break   # Keep the call short; we only need a small reply
+    except Exception:
+        return None
+
