@@ -100,3 +100,20 @@ class LMStudioProvider(BaseLLMProvider):
                     "(LM Studio → Developer tab → Start Server)"
                 ) from e
 
+    async def health_check(self) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                r = await client.get(f"{self._base}/models")
+                return r.status_code == 200
+        except Exception:
+            return False
+
+    async def list_models(self) -> List[str]:
+        """Return model ids LM Studio currently reports via /v1/models."""
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                r = await client.get(f"{self._base}/models")
+                data = r.json()
+                return [m["id"] for m in data.get("data", [])]
+        except Exception:
+            return []
