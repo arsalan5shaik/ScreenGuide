@@ -206,3 +206,38 @@ final class MenuBarPanelManager: NSObject {
     private func installClickOutsideMonitor() {
         removeClickOutsideMonitor()
 
+        clickOutsideMonitor = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]
+        ) { [weak self] event in
+            guard let self, let panel = self.panel else { return }
+
+            // Check if the click is inside the status item button — if so, the
+            // statusItemClicked handler will toggle the panel, so don't also hide.
+            let clickLocation = NSEvent.mouseLocation
+            if panel.frame.contains(clickLocation) {
+                return
+            }
+
+            // Delay dismissal slightly to avoid closing the panel when
+            // a system permission dialog appears (e.g. microphone access).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                guard panel.isVisible else { return }
+
+                // If permissions aren't all granted yet, a system dialog
+                // may have focus — don't dismiss during onboarding.
+                if !self.companionManager.allPermissionsGranted && !NSApp.isActive {
+                    return
+                }
+
+                self.hidePanel()
+            }
+        }
+    }
+
+    private func removeClickOutsideMonitor() {
+        if let monitor = clickOutsideMonitor {
+            NSEvent.removeMonitor(monitor)
+            clickOutsideMonitor = nil
+        }
+    }
+}
