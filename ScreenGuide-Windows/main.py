@@ -277,3 +277,70 @@ def main():
     tray.on_set_response_language.connect(manager.set_response_language)
     tray.on_set_custom_instructions.connect(manager.set_custom_instructions)
 
+    # When the installed-model list arrives, push it into the tray submenu
+    manager.sig_ollama_models.connect(tray.set_ollama_models)
+
+    # Surface pull progress as tray toasts so students see download status
+    def _on_ollama_pull_status(name: str, status: str):
+        tray.show_notification("Ollama", status)
+    manager.sig_ollama_pull_status.connect(_on_ollama_pull_status)
+
+    # First-run: poll Ollama if it's the active provider so the menu
+    # actually shows installed models from the start.
+    if cfg.llm_provider() == "ollama":
+        manager.refresh_ollama_models()
+
+    # Setup wizard (re-run) + diagnostics
+    def _run_setup_again():
+        from ui.setup_wizard import SetupWizard
+        wiz = SetupWizard()
+        wiz.show()
+        _setup_keepalive[0] = wiz
+    tray.on_run_setup.connect(_run_setup_again)
+
+    def _save_diagnostics():
+        import datetime, json, platform, traceback
+        from ai import ollama_bootstrap as ob
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        out = Path(base) / "ScreenGuide" / f"diagnostics-{datetime.datetime.now():%Y%m%d-%H%M%S}.txt"
+        try:
+            providers_d = cfg.describe()
+        except Exception:
+            providers_d = {}
+        report = []
+        report.append(f"ScreenGuide diagnostics — {datetime.datetime.now().isoformat()}")
+        report.append(f"Python: {sys.version.split()[0]}")
+        report.append(f"Platform: {platform.platform()}")
+        report.append(f"Active LLM: {providers_d.get('llm', '?')}")
+        report.append(f"STT: {providers_d.get('stt', '?')}  TTS: {providers_d.get('tts', '?')}")
+        report.append("")
+        report.append("─── Ollama ───")
+        try:
+            report.append(f"Host: {cfg.ollama_host}")
+            report.append(f"Text model:   {cfg.ollama_text_model}")
+            report.append(f"Vision model: {cfg.ollama_vision_model}")
+            report.append(f"Binary on PATH: {ob.is_ollama_installed()}")
+            report.append(f"Server reachable: {ob.is_ollama_running()}")
+            if ob.is_ollama_running():
+                report.append(f"Installed models: {ob.list_installed_models()}")
+        except Exception:
+            report.append(traceback.format_exc())
+        report.append("")
+        report.append("─── GitHub Copilot ───")
+        try:
+            from ai.github_copilot_provider import is_authenticated, _token_path
+            report.append(f"Token file: {_token_path()}  exists={_token_path().exists()}")
+            report.append(f"Authenticated: {is_authenticated()}")
+        except Exception:
+            report.append(traceback.format_exc())
+        try:
+            out.write_text("\n".join(report), encoding="utf-8")
+            tray.show_notification("Diagnostics saved", str(out))
+            try:
+                os.startfile(str(out))
+            except Exception:
+                pass
+        except Exception as e:
+            tray.show_notification("Diagnostics failed", str(e))
+    tray.on_diagnostics.connect(_save_diagnostics)
+
