@@ -224,3 +224,56 @@ def main():
             subprocess.Popen(["explorer", path])
     tray.on_journal_open.connect(_open_journal)
 
+    # Attach document (drag-drop alternative — file picker)
+    def _attach_doc():
+        from PyQt6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            None, "Attach a document for ScreenGuide",
+            "", "Documents (*.pdf *.docx *.txt *.md *.csv)"
+        )
+        if path:
+            ok = manager.attach_document(path)
+            tray.show_notification(
+                "Document Attached",
+                f"{path}\nAsk ScreenGuide about it now." if ok else
+                "Couldn't read that file."
+            )
+    tray.on_attach_doc.connect(_attach_doc)
+
+    def _switch(name: str):
+        manager.set_active_provider(name)
+        panel.refresh_for_provider(name)       # repopulate model dropdown + badge
+        tray.rebuild_menu()                    # tick mark moves to new provider
+        tray.show_notification("ScreenGuide", f"Switched to {name}")
+
+    tray.on_switch_provider.connect(_switch)
+    tray.on_stop.connect(manager.stop)
+    tray.on_copilot_login.connect(lambda: _copilot_login_flow(tray, panel, manager))
+    tray.on_copilot_refresh.connect(manager.refresh_copilot_models)
+
+    # When the live model list arrives, repopulate the panel + show a toast
+    def _on_copilot_models_done(count: int):
+        if cfg.llm_provider() == "copilot":
+            panel.refresh_for_provider("copilot")
+        tray.show_notification(
+            "GitHub Copilot",
+            f"Loaded {count} models from your seat. Free models are tagged "
+            f"in the Model dropdown."
+        )
+    manager.sig_copilot_models_done.connect(_on_copilot_models_done)
+
+    # Live model auto-refresh for Claude / OpenAI / Gemini (30-day cache).
+    # Repopulate the panel whenever a refresh lands.
+    def _on_models_refreshed(provider: str, count: int):
+        if cfg.llm_provider() == provider:
+            panel.refresh_for_provider(provider)
+    manager.sig_models_refreshed.connect(_on_models_refreshed)
+
+    # ── Ollama multi-model wiring ─────────────────────────────────────────
+    tray.on_ollama_set_model.connect(manager.set_ollama_model)
+    tray.on_ollama_pull.connect(manager.pull_ollama_model)
+    tray.on_ollama_refresh.connect(manager.refresh_ollama_models)
+    tray.on_set_mic_device.connect(manager.set_mic_device)
+    tray.on_set_response_language.connect(manager.set_response_language)
+    tray.on_set_custom_instructions.connect(manager.set_custom_instructions)
+
