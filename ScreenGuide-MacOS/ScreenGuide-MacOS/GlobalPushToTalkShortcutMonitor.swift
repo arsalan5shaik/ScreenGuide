@@ -1,0 +1,50 @@
+//
+//  GlobalPushToTalkShortcutMonitor.swift
+//  ScreenGuide-MacOS
+//
+//  Captures push-to-talk keyboard shortcuts while makesomething is running in the
+//  background. Uses a listen-only CGEvent tap so modifier-only shortcuts like
+//  ctrl + option behave more like a real system-wide voice tool.
+//
+
+import AppKit
+import Combine
+import CoreGraphics
+import Foundation
+
+final class GlobalPushToTalkShortcutMonitor: ObservableObject {
+    let shortcutTransitionPublisher = PassthroughSubject<BuddyPushToTalkShortcut.ShortcutTransition, Never>()
+
+    private var globalEventTap: CFMachPort?
+    private var globalEventTapRunLoopSource: CFRunLoopSource?
+    /// Mutated exclusively from the CGEvent tap callback, which runs on
+    /// `CFRunLoopGetMain()` and therefore always executes on the main thread.
+    /// Published so the overlay can hide immediately on key release without
+    /// waiting for the async dictation state pipeline to catch up.
+    @Published private(set) var isShortcutCurrentlyPressed = false
+
+    deinit {
+        stop()
+    }
+
+    func start() {
+        // If the event tap is already running, don't restart it.
+        // Restarting resets isShortcutCurrentlyPressed, which would kill
+        // the waveform overlay mid-press when the permission poller calls
+        // refreshAllPermissions → start() every few seconds.
+        guard globalEventTap == nil else { return }
+
+        let monitoredEventTypes: [CGEventType] = [.flagsChanged, .keyDown, .keyUp]
+        let eventMask = monitoredEventTypes.reduce(CGEventMask(0)) { currentMask, eventType in
+            currentMask | (CGEventMask(1) << eventType.rawValue)
+        }
+
+        let eventTapCallback: CGEventTapCallBack = { _, eventType, event, userInfo in
+            guard let userInfo else {
+                return Unmanaged.passUnretained(event)
+            }
+
+            let globalPushToTalkShortcutMonitor = Unmanaged<GlobalPushToTalkShortcutMonitor>
+                .fromOpaque(userInfo)
+                .takeUnretainedValue()
+
