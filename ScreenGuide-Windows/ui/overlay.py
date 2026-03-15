@@ -376,3 +376,76 @@ class CursorOverlay(QWidget):
         self._flight_phase = phase
         self._vel = QPointF(0, 0)
 
+    def hide_cursor(self):
+        self._release_lock()
+        self.set_mode(MODE_IDLE)
+
+    # ── Internal ──────────────────────────────────────────────────────────────
+
+    def _cover_all_monitors(self):
+        geo = QApplication.primaryScreen().virtualGeometry()
+        for s in QApplication.screens():
+            geo = geo.united(s.geometry())
+        # Leave a 2px gap at the bottom edge: a topmost window covering the
+        # full screen suppresses Windows' auto-hide taskbar hover trigger.
+        # The buddy just never renders in those 2 rows.
+        geo.setBottom(geo.bottom() - 2)
+        self.setGeometry(geo)
+
+    def _release_lock(self):
+        self._locked_pos = None
+        self._bubble_text = ""
+        self._bubble_alpha = 0.0
+        self._bubble_scale = 0.5
+        self._flight_phase = _PHASE_FOLLOW
+        self._flight_scale = 1.0
+        self._rotation_deg = TRI_ROTATION_DEG
+        self._hold_dwell = False
+        self._ring = None
+
+    def _tick(self):
+        qp = QCursor.pos()
+        real = QPointF(qp.x(), qp.y())
+
+        # ── Pointing phase machine ──
+        if self._flight_phase in (_PHASE_FLYING, _PHASE_RETURNING):
+            elapsed = time.monotonic() - self._fly_t0
+            lp = min(1.0, elapsed / max(0.001, self._fly_duration))
+            # Smoothstep easing — gentle start and end, teacher-friendly
+            t = lp * lp * (3.0 - 2.0 * lp)
+            omt = 1.0 - t
+            bx = omt * omt * self._fly_start_pos.x() \
+                 + 2 * omt * t * self._fly_control.x() \
+                 + t * t * self._fly_end_pos.x()
+            by = omt * omt * self._fly_start_pos.y() \
+                 + 2 * omt * t * self._fly_control.y() \
+                 + t * t * self._fly_end_pos.y()
+            self._display_pos = QPointF(bx, by)
+            # Rotate to tangent so the triangle "leans into" the flight
+            tgx = 2 * omt * (self._fly_control.x() - self._fly_start_pos.x()) \
+                  + 2 * t * (self._fly_end_pos.x() - self._fly_control.x())
+            tgy = 2 * omt * (self._fly_control.y() - self._fly_start_pos.y()) \
+                  + 2 * t * (self._fly_end_pos.y() - self._fly_control.y())
+            self._rotation_deg = math.degrees(math.atan2(tgy, tgx)) + 90.0
+            # Swoop scale pulse at midpoint
+            self._flight_scale = 1.0 + math.sin(lp * math.pi) * 0.25
+            # Bubble eases in during the flight
+            if self._flight_phase == _PHASE_FLYING:
+                self._bubble_alpha = min(1.0, lp * 1.4)
+                self._bubble_scale = 0.5 + lp * 0.5
+            if lp >= 1.0:
+                if self._flight_phase == _PHASE_FLYING:
+                    self._flight_phase = _PHASE_DWELLING
+                    if self._hold_dwell:
+                        self._dwell_until = float("inf")
+                    else:
+                        mult = 1.7 if self._slow_mode else 1.0
+                        self._dwell_until = time.monotonic() + DWELL_SECONDS * mult
+                    self._flight_scale = 1.0
+                    self._rotation_deg = TRI_ROTATION_DEG
+                else:  # RETURNING
+                    self._release_lock()
+            self._phase += 0.10
+            self.update()
+            return
+
