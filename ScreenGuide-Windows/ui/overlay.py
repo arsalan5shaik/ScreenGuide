@@ -323,3 +323,56 @@ class CursorOverlay(QWidget):
         self._draw_queue_end = start + dur + SHAPE_GAP_SECONDS
         self._annotations.append(shape)
 
+    # Legacy single-shape helpers (kept for compatibility with old signals)
+    def add_arrow(self, x1, y1, x2, y2, ttl=None):
+        self.add_shape({"kind": "arrow", "pts": [(x1, y1), (x2, y2)], "ttl": ttl})
+
+    def add_circle(self, x, y, radius=30.0, ttl=None):
+        self.add_shape({"kind": "circle", "x": x, "y": y, "r": radius, "ttl": ttl})
+
+    def add_underline(self, x, y, width, ttl=None):
+        self.add_shape({"kind": "underline", "x": x, "y": y, "w": width, "ttl": ttl})
+
+    def add_text(self, x, y, text, ttl=None):
+        self.add_shape({"kind": "text", "x": x, "y": y, "text": text,
+                        "size": "s", "ttl": ttl})
+
+    def clear_annotations(self):
+        self._annotations = []
+        self._draw_queue_end = 0.0
+        self._last_tip = None
+
+    def _active_stroke_tip(self):
+        """Pen tip of the currently-animating shape, or None. The buddy
+        rides this point so ScreenGuide visibly draws each stroke."""
+        now = time.monotonic()
+        active = None
+        for ann in self._annotations:
+            if ann["start"] <= now < ann["start"] + ann["dur"]:
+                if active is None or ann["start"] > active["start"]:
+                    active = ann
+        if active is None:
+            return None
+        u = (now - active["start"]) / active["dur"]
+        return _stroke_tip(active, u)
+
+    def _begin_flight(self, start: QPointF, end: QPointF, phase: str):
+        dx, dy = end.x() - start.x(), end.y() - start.y()
+        dist = math.hypot(dx, dy)
+        mult = 1.7 if self._slow_mode else 1.0
+        # Scale duration by distance so short hops don't feel sluggish
+        dur = max(FLY_DURATION_MIN, min(FLY_DURATION_MAX, FLY_DURATION_MIN + dist / 700.0))
+        if phase == _PHASE_RETURNING:
+            dur = RETURN_DURATION
+        dur *= mult
+        # Arc up over the midpoint
+        mid = QPointF((start.x() + end.x()) / 2, (start.y() + end.y()) / 2)
+        arc_height = min(dist * 0.22, 90.0)
+        self._fly_control   = QPointF(mid.x(), mid.y() - arc_height)
+        self._fly_start_pos = QPointF(start.x(), start.y())
+        self._fly_end_pos   = QPointF(end.x(), end.y())
+        self._fly_t0 = time.monotonic()
+        self._fly_duration = dur
+        self._flight_phase = phase
+        self._vel = QPointF(0, 0)
+
