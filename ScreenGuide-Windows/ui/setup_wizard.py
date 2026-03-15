@@ -101,3 +101,56 @@ class SetupWizard(QDialog):
         layout.setContentsMargins(32, 28, 32, 24)
         layout.setSpacing(14)
 
+        self.title = QLabel("Welcome to ScreenGuide")
+        self.title.setObjectName("title")
+        layout.addWidget(self.title)
+
+        self.subtitle = QLabel(
+            "ScreenGuide uses Ollama to run AI locally on your computer — for free, "
+            "with no API keys required. Let's set it up in 2 minutes."
+        )
+        self.subtitle.setObjectName("subtitle")
+        self.subtitle.setWordWrap(True)
+        layout.addWidget(self.subtitle)
+
+        # status block
+        self.status = QLabel("")
+        self.status.setObjectName("status")
+        self.status.setWordWrap(True)
+        layout.addSpacing(8)
+        layout.addWidget(self.status)
+
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 100)
+        self.progress.setValue(0)
+        self.progress.hide()
+        layout.addWidget(self.progress)
+
+        layout.addStretch(1)
+
+        # buttons row
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        self.skip_btn = QPushButton("Skip — I'll use an API key")
+        self.skip_btn.setObjectName("secondary")
+        self.skip_btn.clicked.connect(self._on_skip)
+        btn_row.addWidget(self.skip_btn)
+
+        btn_row.addStretch(1)
+
+        self.action_btn = QPushButton("Get started")
+        self.action_btn.clicked.connect(self._on_action)
+        btn_row.addWidget(self.action_btn)
+
+        layout.addLayout(btn_row)
+
+        self._set_step("intro")
+
+    # ── State machine ────────────────────────────────────────────────────────
+
+    def _set_step(self, step: str):
+        self._step = step
+        self.progress.hide()
+        self.progress.setValue(0)
+
