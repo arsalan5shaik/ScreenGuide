@@ -48,3 +48,63 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
                 .fromOpaque(userInfo)
                 .takeUnretainedValue()
 
+            return globalPushToTalkShortcutMonitor.handleGlobalEventTap(
+                eventType: eventType,
+                event: event
+            )
+        }
+
+        guard let globalEventTap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: eventMask,
+            callback: eventTapCallback,
+            userInfo: Unmanaged.passUnretained(self).toOpaque()
+        ) else {
+            print("⚠️ Global push-to-talk: couldn't create CGEvent tap")
+            return
+        }
+
+        guard let globalEventTapRunLoopSource = CFMachPortCreateRunLoopSource(
+            kCFAllocatorDefault,
+            globalEventTap,
+            0
+        ) else {
+            CFMachPortInvalidate(globalEventTap)
+            print("⚠️ Global push-to-talk: couldn't create event tap run loop source")
+            return
+        }
+
+        self.globalEventTap = globalEventTap
+        self.globalEventTapRunLoopSource = globalEventTapRunLoopSource
+
+        CFRunLoopAddSource(CFRunLoopGetMain(), globalEventTapRunLoopSource, .commonModes)
+        CGEvent.tapEnable(tap: globalEventTap, enable: true)
+    }
+
+    func stop() {
+        isShortcutCurrentlyPressed = false
+
+        if let globalEventTapRunLoopSource {
+            CFRunLoopRemoveSource(CFRunLoopGetMain(), globalEventTapRunLoopSource, .commonModes)
+            self.globalEventTapRunLoopSource = nil
+        }
+
+        if let globalEventTap {
+            CFMachPortInvalidate(globalEventTap)
+            self.globalEventTap = nil
+        }
+    }
+
+    private func handleGlobalEventTap(
+        eventType: CGEventType,
+        event: CGEvent
+    ) -> Unmanaged<CGEvent>? {
+        if eventType == .tapDisabledByTimeout || eventType == .tapDisabledByUserInput {
+            if let globalEventTap {
+                CGEvent.tapEnable(tap: globalEventTap, enable: true)
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
