@@ -204,3 +204,54 @@ def _cli():
         print("Usage: python -m ai.ollama_bootstrap [status|install|pull <model>|diag]")
         return
 
+    cmd = args[0].lower()
+
+    if cmd == "status":
+        print(f"Ollama binary on PATH:  {is_ollama_installed()}")
+        print(f"Ollama server running:  {is_ollama_running()}")
+        if is_ollama_running():
+            models = list_installed_models()
+            print(f"Installed models ({len(models)}):")
+            for m in models:
+                print(f"  • {m}")
+        return
+
+    if cmd == "install":
+        print("Downloading Ollama installer…")
+        p = download_ollama_installer(on_progress=lambda pct: print(f"  {pct:.0f}%", end="\r"))
+        print(f"\nDownloaded to {p}")
+        print("Launching installer (you'll see a UAC prompt)…")
+        rc = run_ollama_installer(p)
+        print(f"Installer exited with code {rc}")
+        print("Waiting for Ollama to come online…")
+        if wait_for_ollama_server(timeout=60):
+            print("Ollama is running.")
+        else:
+            print("Timed out waiting for Ollama. Reboot or start it from the Start menu.")
+        return
+
+    if cmd == "pull":
+        if len(args) < 2:
+            print("pull needs a model name, e.g.:  python -m ai.ollama_bootstrap pull llama3.2:3b")
+            return
+        name = args[1]
+        print(f"Pulling {name}…")
+        ok = pull_model(name, on_progress=lambda s, p: print(f"  {s} {p:.0f}%", end="\r"))
+        print()
+        print("Done." if ok else "Pull failed.")
+        return
+
+    if cmd == "diag":
+        print("─── ScreenGuide Ollama diagnostics ───")
+        print(f"Configured host:          {cfg.ollama_host}")
+        print(f"Configured text model:    {cfg.ollama_text_model}")
+        print(f"Configured vision model:  {cfg.ollama_vision_model}")
+        print(f"Binary on PATH:           {is_ollama_installed()}")
+        print(f"Server reachable:         {is_ollama_running()}")
+        if is_ollama_running():
+            models = list_installed_models()
+            print(f"Installed models:         {models or '(none)'}")
+            print(f"Text model present:       {is_model_installed(cfg.ollama_text_model)}")
+            print(f"Vision model present:     {is_model_installed(cfg.ollama_vision_model)}")
+        return
+
