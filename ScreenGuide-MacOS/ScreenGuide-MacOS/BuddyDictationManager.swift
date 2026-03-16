@@ -259,3 +259,65 @@ final class BuddyDictationManager: NSObject, ObservableObject {
                 || SFSpeechRecognizer.authorizationStatus() == .notDetermined
         }
 
+        return AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
+    }
+
+    private let transcriptionProvider: any BuddyTranscriptionProvider
+    private let audioEngine = AVAudioEngine()
+    private var activeTranscriptionSession: (any BuddyStreamingTranscriptionSession)?
+    private var activeStartSource: BuddyDictationStartSource?
+    private var draftCallbacks: BuddyDictationDraftCallbacks?
+    private var draftTextBeforeCurrentDictation = ""
+    private var latestRecognizedText = ""
+    private var shouldAutomaticallySubmitFinalDraft = false
+    private var hasFinishedCurrentDictationSession = false
+    private var finalizeFallbackWorkItem: DispatchWorkItem?
+    private var pendingStartRequestIdentifier = UUID()
+    private var contextualKeyterms: [String] = []
+    private var lastRecordedAudioPowerSampleDate = Date.distantPast
+    private var activePermissionRequestTask: Task<Bool, Never>?
+    /// Timestamp of the last completed permission request, used to debounce
+    /// rapid follow-up requests that arrive before macOS updates its cache.
+    private var lastPermissionRequestCompletedAt: Date?
+
+    override init() {
+        let transcriptionProvider = BuddyTranscriptionProviderFactory.makeDefaultProvider()
+        self.transcriptionProvider = transcriptionProvider
+        self.transcriptionProviderDisplayName = transcriptionProvider.displayName
+        super.init()
+    }
+
+    func updateContextualKeyterms(_ contextualKeyterms: [String]) {
+        self.contextualKeyterms = contextualKeyterms
+    }
+
+    func startPersistentDictationFromMicrophoneButton(
+        currentDraftText: String,
+        updateDraftText: @escaping (String) -> Void,
+        submitDraftText: @escaping (String) -> Void
+    ) async {
+        await startPushToTalk(
+            startSource: .microphoneButton,
+            currentDraftText: currentDraftText,
+            updateDraftText: updateDraftText,
+            submitDraftText: submitDraftText,
+            shouldAutomaticallySubmitFinalDraftOnStop: false
+        )
+    }
+
+    func startPushToTalkFromKeyboardShortcut(
+        currentDraftText: String,
+        updateDraftText: @escaping (String) -> Void,
+        submitDraftText: @escaping (String) -> Void
+    ) async {
+        await startPushToTalk(
+            startSource: .keyboardShortcut,
+            currentDraftText: currentDraftText,
+            updateDraftText: updateDraftText,
+            submitDraftText: submitDraftText,
+            shouldAutomaticallySubmitFinalDraftOnStop: currentDraftText
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .isEmpty
+        )
+    }
+
