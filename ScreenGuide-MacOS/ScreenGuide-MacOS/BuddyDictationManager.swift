@@ -204,3 +204,58 @@ enum BuddyDictationPermissionProblem {
     case speechRecognitionDenied
 }
 
+private enum BuddyDictationStartSource {
+    case microphoneButton
+    case keyboardShortcut
+}
+
+private struct BuddyDictationDraftCallbacks {
+    let updateDraftText: (String) -> Void
+    let submitDraftText: (String) -> Void
+}
+
+@MainActor
+final class BuddyDictationManager: NSObject, ObservableObject {
+    private static let defaultFinalTranscriptFallbackDelaySeconds: TimeInterval = 2.4
+    private static let recordedAudioPowerHistoryLength = 44
+    private static let recordedAudioPowerHistoryBaselineLevel: CGFloat = 0.02
+    private static let recordedAudioPowerHistorySampleIntervalSeconds: TimeInterval = 0.07
+
+    @Published private(set) var isRecordingFromMicrophoneButton = false
+    @Published private(set) var isRecordingFromKeyboardShortcut = false
+    @Published private(set) var isKeyboardShortcutSessionActiveOrFinalizing = false
+    @Published private(set) var isFinalizingTranscript = false
+    @Published private(set) var isPreparingToRecord = false
+    @Published private(set) var currentAudioPowerLevel: CGFloat = 0
+    @Published private(set) var recordedAudioPowerHistory = Array(
+        repeating: BuddyDictationManager.recordedAudioPowerHistoryBaselineLevel,
+        count: BuddyDictationManager.recordedAudioPowerHistoryLength
+    )
+    @Published private(set) var microphoneButtonRecordingStartedAt: Date?
+    @Published private(set) var transcriptionProviderDisplayName = ""
+    @Published var lastErrorMessage: String?
+    @Published private(set) var currentPermissionProblem: BuddyDictationPermissionProblem?
+
+    var isDictationInProgress: Bool {
+        isPreparingToRecord || isRecordingFromMicrophoneButton || isRecordingFromKeyboardShortcut || isFinalizingTranscript
+    }
+
+    var isActivelyRecordingAudio: Bool {
+        isRecordingFromMicrophoneButton || isRecordingFromKeyboardShortcut
+    }
+
+    var isMicrophoneButtonActivelyRecordingAudio: Bool {
+        isRecordingFromMicrophoneButton
+    }
+
+    var isMicrophoneButtonSessionBusy: Bool {
+        activeStartSource == .microphoneButton
+            && (isPreparingToRecord || isRecordingFromMicrophoneButton || isFinalizingTranscript)
+    }
+
+    var needsInitialPermissionPrompt: Bool {
+        if transcriptionProvider.requiresSpeechRecognitionPermission {
+            return AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
+                || SFSpeechRecognizer.authorizationStatus() == .notDetermined
+        }
+
