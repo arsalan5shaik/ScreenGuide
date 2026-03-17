@@ -107,3 +107,54 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
         self.urlSession = URLSession(configuration: urlSessionConfiguration)
     }
 
+    func appendAudioBuffer(_ audioBuffer: AVAudioPCMBuffer) {
+        guard let audioPCM16Data = audioPCM16Converter.convertToPCM16Data(from: audioBuffer),
+              !audioPCM16Data.isEmpty else {
+            return
+        }
+
+        stateQueue.async {
+            guard !self.hasRequestedFinalTranscript, !self.isCancelled else { return }
+            self.bufferedPCM16AudioData.append(audioPCM16Data)
+        }
+    }
+
+    func requestFinalTranscript() {
+        stateQueue.async {
+            guard !self.hasRequestedFinalTranscript, !self.isCancelled else { return }
+            self.hasRequestedFinalTranscript = true
+
+            let bufferedPCM16AudioData = self.bufferedPCM16AudioData
+            self.transcriptionUploadTask = Task { [weak self] in
+                await self?.transcribeBufferedAudio(bufferedPCM16AudioData)
+            }
+        }
+    }
+
+    func cancel() {
+        stateQueue.async {
+            self.isCancelled = true
+            self.bufferedPCM16AudioData.removeAll(keepingCapacity: false)
+        }
+
+        transcriptionUploadTask?.cancel()
+        urlSession.invalidateAndCancel()
+    }
+
+    private func transcribeBufferedAudio(_ bufferedPCM16AudioData: Data) async {
+        guard !Task.isCancelled else { return }
+
+        let trimmedAudioDataIsEmpty = stateQueue.sync {
+            isCancelled || bufferedPCM16AudioData.isEmpty
+        }
+
+        if trimmedAudioDataIsEmpty {
+            deliverFinalTranscript("")
+            return
+        }
+
+        let wavAudioData = BuddyWAVFileBuilder.buildWAVData(
+            fromPCM16MonoAudio: bufferedPCM16AudioData,
+            sampleRate: Self.targetSampleRate
+        )
+
