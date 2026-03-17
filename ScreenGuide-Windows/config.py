@@ -50,3 +50,70 @@ HARD RULES (never break):
 STYLE: warm, concise, teacher-y. 1-2 sentences per step. No markdown bullets
 unless genuinely listing options."""
 
+
+# Technical rules ScreenGuide needs to actually draw on screen and point at
+# elements correctly. Always appended after the user-editable prompt above
+# — kept separate because breaking this syntax breaks pointing/drawing, and
+# most users have no reason to touch it.
+_TECHNICAL_RULES = """
+
+COORDINATE SYSTEM (applies to every tag below): coordinates are NORMALIZED
+0-1000 relative to the screenshot. x=0 is the LEFT edge, x=1000 the RIGHT
+edge; y=0 is the TOP, y=1000 the BOTTOM. The exact centre of the screen is
+500,500. Sizes/radii use the same scale (100 = 10% of screen width).
+
+POINTING: when you need to point at something, emit EXACTLY ONE tag
+[POINT:x,y:label:screen1] using normalized coordinates and a 1-3 word label,
+using any DETECTED ELEMENT coordinate provided above verbatim if given.
+
+DRAWING TAGS (coords normalized 0-1000, trailing :color always optional):
+  [LINE:x1,y1->x2,y2:color]         straight line
+  [ARROW:x1,y1->x2,y2:color]        line with arrowhead (points at x2,y2)
+  [CIRCLE:x,y,r:label:color]        ring; label optional
+  [RECT:x1,y1,x2,y2:color]          rectangle by opposite corners
+  [POLY:x1,y1 x2,y2 x3,y3:color]    closed shape, 3+ points (triangles!)
+  [TEXT:x,y:content:color:size]     text; size s|m|l (default m)
+  [ANGLE:x,y,s,rot:color]           right-angle marker at corner (x,y)
+  [CLEAR]                           wipe all drawings
+Colors: blue red green yellow orange purple white cyan (default blue).
+For real UI elements use anchors instead of guessing coordinates:
+  [CIRCLE:@Save button]  [UNDERLINE:@File menu]  — resolved pixel-perfectly.
+
+TEACHING WITH DRAWINGS: when explaining something visible on screen (a
+figure, chart, diagram, equation, code), draw ON it — trace edges, label
+parts, add helper lines — interleaving tags with your spoken words in the
+order a teacher draws on a whiteboard. Place TEXT next to what it names,
+never covering it. Use up to ~10 shapes for a full lesson, 1-2 for a quick
+highlight.
+
+ACCURACY DISCIPLINE: if DETECTED FIGURES are listed above, copy those
+vertex numbers into your tags EXACTLY. Only estimate coordinates for things
+not listed. When estimating: fix the figure's bounding box first, derive
+every endpoint from it, and reuse IDENTICAL numbers for shared vertices.
+
+NARRATION SYNC: ScreenGuide speaks your response sentence by sentence and draws
+each sentence's tags WHILE saying that sentence — put every tag immediately
+after the words that describe it, spread across the lesson (1-2 tags per
+sentence), never dump all tags at the start or end."""
+
+
+@dataclass
+class Config:
+    # LLM
+    anthropic_api_key: Optional[str] = field(default_factory=lambda: os.getenv("ANTHROPIC_API_KEY") or None)
+    openai_api_key: Optional[str] = field(default_factory=lambda: os.getenv("OPENAI_API_KEY") or None)
+    # Point the OpenAI provider at any OpenAI-compatible server (DeepSeek,
+    # Alibaba DashScope/Qwen, SiliconFlow, OpenRouter...). Empty = real OpenAI.
+    openai_base_url: str = field(default_factory=lambda: os.getenv("OPENAI_BASE_URL", "").strip())
+    openai_default_model: str = field(default_factory=lambda: os.getenv("OPENAI_DEFAULT_MODEL", "").strip())
+    google_api_key: Optional[str] = field(default_factory=lambda: os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or None)
+    ollama_host: str = field(default_factory=lambda: os.getenv("OLLAMA_HOST", "http://localhost:11434"))
+    # Legacy single-model knob — still respected as a fallback for both slots
+    # below. New users should prefer OLLAMA_VISION_MODEL / OLLAMA_TEXT_MODEL.
+    ollama_model: str = field(default_factory=lambda: os.getenv("OLLAMA_MODEL", "llama3.2-vision"))
+    # Two-slot model selection: vision = screen-aware queries, text = Code Mode
+    # / journal Q&A / no-screenshot replies. Either can be overridden at runtime
+    # via cfg.set_ollama_model("vision"|"text", name).
+    ollama_vision_model: str = field(default_factory=lambda: os.getenv("OLLAMA_VISION_MODEL", "") or os.getenv("OLLAMA_MODEL", "llama3.2-vision"))
+    ollama_text_model:   str = field(default_factory=lambda: os.getenv("OLLAMA_TEXT_MODEL", "") or "llama3.2:3b")
+
