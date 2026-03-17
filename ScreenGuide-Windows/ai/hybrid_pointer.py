@@ -158,3 +158,57 @@ def _find_via_uia(query: str, min_score: float = 0.5) -> Optional[Target]:
         log.debug("UIA: no match for %r (scanned %d nodes)", query, visited)
         return None
 
+    score, node = best
+    r = node.BoundingRectangle
+    cx = int((r.left + r.right) // 2)
+    cy = int((r.top + r.bottom) // 2)
+    log.info("UIA hit: %r -> %s [%s] @ (%d,%d) score=%.2f",
+             query, node.Name, node.ControlTypeName, cx, cy, score)
+    return Target(
+        x=cx, y=cy,
+        bbox=(int(r.left), int(r.top), int(r.right), int(r.bottom)),
+        label=node.Name or node.ControlTypeName,
+        source="uia",
+        confidence=score,
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  TIER 2 — Offline OCR (RapidOCR, ONNX)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_ocr_engine = None
+
+
+def _get_ocr():
+    global _ocr_engine
+    if _ocr_engine is None:
+        try:
+            from rapidocr_onnxruntime import RapidOCR
+            _ocr_engine = RapidOCR()
+        except ImportError:
+            log.warning("rapidocr-onnxruntime not installed — Tier 2 (OCR) disabled")
+            return None
+        except Exception as e:
+            log.warning("OCR engine init failed: %s", e)
+            return None
+    return _ocr_engine
+
+
+def _find_via_ocr(query: str, screenshot_path: Optional[str] = None,
+                  pil_image=None, min_score: float = 0.5) -> Optional[Target]:
+    """Run OCR on the primary screen, fuzzy-match the query against detected text."""
+    ocr = _get_ocr()
+    if ocr is None:
+        return None
+
+    try:
+        if pil_image is None and screenshot_path is None:
+            # Capture primary screen at full resolution
+            import mss
+            with mss.mss() as sct:
+                mon = sct.monitors[1]
+                raw = sct.grab(mon)
+                from PIL import Image
+                pil_image = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+
