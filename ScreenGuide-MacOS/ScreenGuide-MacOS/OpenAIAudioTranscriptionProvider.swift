@@ -158,3 +158,54 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
             sampleRate: Self.targetSampleRate
         )
 
+        do {
+            let transcriptText = try await requestTranscription(for: wavAudioData)
+            guard !stateQueue.sync(execute: { isCancelled }) else { return }
+
+            if !transcriptText.isEmpty {
+                onTranscriptUpdate(transcriptText)
+            }
+
+            deliverFinalTranscript(transcriptText)
+        } catch {
+            guard !stateQueue.sync(execute: { isCancelled }) else { return }
+            print("[OpenAI Transcription] ❌ Upload failed (audio size: \(wavAudioData.count) bytes): \(error.localizedDescription)")
+            onError(error)
+        }
+    }
+
+    private func requestTranscription(for wavAudioData: Data) async throws -> String {
+        let multipartBoundary = "Boundary-\(UUID().uuidString)"
+        var request = URLRequest(url: Self.transcriptionURL)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("multipart/form-data; boundary=\(multipartBoundary)", forHTTPHeaderField: "Content-Type")
+
+        let requestBodyData = makeMultipartRequestBody(
+            boundary: multipartBoundary,
+            wavAudioData: wavAudioData
+        )
+        request.httpBody = requestBodyData
+
+        let (responseData, response) = try await urlSession.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw OpenAIAudioTranscriptionProviderError(
+                message: "OpenAI transcription returned an invalid response."
+            )
+        }
+
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let responseText = String(data: responseData, encoding: .utf8) ?? "Unknown error"
+            throw OpenAIAudioTranscriptionProviderError(
+                message: "OpenAI transcription failed: \(responseText)"
+            )
+        }
+
+        if let transcriptionResponse = try? JSONDecoder().decode(
+            TranscriptionResponse.self,
+            from: responseData
+        ) {
+            return transcriptionResponse.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
