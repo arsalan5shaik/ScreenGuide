@@ -166,3 +166,59 @@ class AmbientListener:
             self._rec_buffer.append(pcm_int16.tobytes())
             return
 
+        # Standby: VAD-based segment capture for wake-word
+        if not self._wake_word_enabled:
+            return
+
+        # Maintain tiny pre-roll
+        self._preroll.append(pcm_int16.copy())
+        if len(self._preroll) > PRE_ROLL_BLOCKS:
+            self._preroll.pop(0)
+
+        is_speech = rms > ENERGY_THRESHOLD
+
+        if not self._in_segment:
+            if is_speech:
+                self._seg_speech_blocks += 1
+                self._seg_buffer.append(pcm_int16.copy())
+                if self._seg_speech_blocks >= MIN_SPEECH_BLOCKS:
+                    self._in_segment = True
+                    # Prepend pre-roll so we catch the start of the word
+                    self._seg_buffer = list(self._preroll) + self._seg_buffer
+            else:
+                self._seg_speech_blocks = max(0, self._seg_speech_blocks - 1)
+                if not self._seg_speech_blocks:
+                    self._seg_buffer = []
+            return
+
+        # In-segment
+        self._seg_buffer.append(pcm_int16.copy())
+        if is_speech:
+            self._seg_silence_blocks = 0
+        else:
+            self._seg_silence_blocks += 1
+
+        end = (
+            self._seg_silence_blocks >= SILENCE_BLOCKS_END
+            or len(self._seg_buffer) >= MAX_SEGMENT_BLOCKS
+        )
+        if end:
+            seg = np.concatenate(self._seg_buffer).astype(np.int16).tobytes()
+            self._reset_segment()
+            self._dispatch_wake_check(seg)
+
+    def _reset_segment(self):
+        self._seg_buffer = []
+        self._seg_speech_blocks = 0
+        self._seg_silence_blocks = 0
+        self._in_segment = False
+
+    # ── Wake-word transcription (off the audio thread) ────────────────────────
+
+    def _dispatch_wake_check(self, pcm: bytes):
+        if self._wake_inflight:
+            return
+        self._wake_inflight = True
+        t = threading.Thread(target=self._check_wake, args=(pcm,), daemon=True)
+        t.start()
+
