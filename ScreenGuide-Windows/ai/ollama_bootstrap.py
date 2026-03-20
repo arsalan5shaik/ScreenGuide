@@ -255,3 +255,8 @@ def _cli():
             print(f"Vision model present:     {is_model_installed(cfg.ollama_vision_model)}")
         return
 
+    print(f"Unknown command: {cmd}")
+
+
+if __name__ == "__main__":
+    _cli()
