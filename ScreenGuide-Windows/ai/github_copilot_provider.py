@@ -109,3 +109,81 @@ async def device_login(open_browser: bool = True,
         r.raise_for_status()
         d = r.json()
 
+    user_code = d["user_code"]
+    verification_uri = d["verification_uri"]
+    device_code = d["device_code"]
+    interval = max(5, int(d.get("interval", 5)))
+    expires_in = int(d.get("expires_in", 900))
+    _log_login(f"Got device code. user_code={user_code} interval={interval}s expires_in={expires_in}s")
+
+    print("\n" + "─" * 56)
+    print("  GITHUB COPILOT LOGIN")
+    print("─" * 56)
+    print(f"  1. Open: {verification_uri}")
+    print(f"  2. Enter code: {user_code}")
+    print(f"  3. Click 'Authorize' in GitHub.")
+    print("─" * 56 + "\n")
+
+    # Notify the UI so the code is visible even when there's no terminal
+    if on_code is not None:
+        try:
+            on_code(user_code, verification_uri)
+        except Exception:
+            pass
+
+    if open_browser:
+        try:
+            webbrowser.open(verification_uri)
+        except Exception:
+            pass
+
+    deadline = time.time() + expires_in
+    poll_count = 0
+    async with httpx.AsyncClient(timeout=15) as client:
+        while time.time() < deadline:
+            await asyncio.sleep(interval)
+            poll_count += 1
+            try:
+                r = await client.post(
+                    ACCESS_TOKEN_URL,
+                    data={
+                        "client_id": VSCODE_CLIENT_ID,
+                        "device_code": device_code,
+                        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+                    },
+                    headers={"Accept": "application/json"},
+                )
+            except Exception as e:
+                _log_login(f"poll #{poll_count} network error: {e}")
+                continue
+            if r.status_code != 200:
+                _log_login(f"poll #{poll_count} HTTP {r.status_code}")
+                continue
+            body = r.json()
+            if "access_token" in body:
+                token = body["access_token"]
+                _token_path().write_text(json.dumps({"access_token": token}))
+                _log_login(f"✅ Signed in after {poll_count} polls. Token saved.")
+                print("✅  Signed in. Token saved to", _token_path())
+                # Eagerly fetch the model list so the panel reflects what
+                # the user actually has access to *right now*.
+                try:
+                    models = await refresh_models_to_cache()
+                    print(f"   Found {len(models)} chat models on your seat. "
+                          f"Free: {len([m for m in models if m['multiplier']==0])}.")
+                except Exception as e:
+                    print(f"   (Could not refresh model list: {e})")
+                return token
+            if body.get("error") == "authorization_pending":
+                if poll_count % 6 == 0:   # log roughly every 30s
+                    _log_login(f"poll #{poll_count}: still pending…")
+                continue
+            if body.get("error") == "slow_down":
+                interval += 5
+                _log_login(f"poll #{poll_count}: slow_down — interval now {interval}s")
+                continue
+            if body.get("error") in ("expired_token", "access_denied"):
+                _log_login(f"poll #{poll_count}: terminal error {body.get('error')}")
+                raise RuntimeError(f"Copilot login failed: {body.get('error')}")
+            _log_login(f"poll #{poll_count}: unexpected body keys={list(body.keys())}")
+
