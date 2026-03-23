@@ -281,3 +281,58 @@ class CompanionPanel(QWidget):
         footer.addWidget(self._model_combo, stretch=1)
         root.addLayout(footer)
 
+    def _populate_models(self):
+        self._set_models_for(cfg.llm_provider())
+
+    def _set_models_for(self, provider: str):
+        # Avoid firing on_model_changed while we rebuild
+        self._model_combo.blockSignals(True)
+        self._model_combo.clear()
+        if provider == "copilot":
+            for mid, label in _copilot_model_choices():
+                self._model_combo.addItem(label, userData=mid)
+        elif provider in ("claude", "openai", "gemini"):
+            try:
+                from ai.model_registry import cached_models
+                for m in cached_models(provider):
+                    label = m["id"]
+                    if not m.get("vision"):
+                        label += "  (no vision)"
+                    self._model_combo.addItem(label, userData=m["id"])
+            except Exception:
+                self._model_combo.addItem("default", userData="default")
+        else:   # ollama
+            self._model_combo.addItem(cfg.ollama_model, userData=cfg.ollama_model)
+        self._model_combo.blockSignals(False)
+        # Fire once with the new default model id (NOT the display label) so
+        # the manager picks it up — important when label != id.
+        if self._model_combo.count():
+            self.on_model_changed.emit(self._model_combo.currentData() or self._model_combo.currentText())
+
+    def refresh_for_provider(self, provider: str):
+        """Called from outside when the active provider is switched at runtime."""
+        self._badge.set_provider(provider)
+        self._set_models_for(provider)
+
+    def _position_bottom_right(self):
+        from PyQt6.QtWidgets import QApplication
+        screen = QApplication.primaryScreen().geometry()
+        x = screen.right() - PANEL_WIDTH - 24
+        y = screen.bottom() - PANEL_HEIGHT - 60
+        self.move(x, y)
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def set_state(self, state: AppState):
+        self._state = state
+        color = STATE_COLORS[state]
+        self._status_dot.setStyleSheet(
+            f"color: rgb({color.red()},{color.green()},{color.blue()}); font-size: 10px;"
+        )
+        self._status_label.setText(STATE_LABELS[state])
+        self._waveform.setVisible(state == AppState.LISTENING)
+        if state == AppState.LISTENING:
+            self._waveform.start()
+        else:
+            self._waveform.stop()
+
