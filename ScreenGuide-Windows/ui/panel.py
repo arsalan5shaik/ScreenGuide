@@ -336,3 +336,53 @@ class CompanionPanel(QWidget):
         else:
             self._waveform.stop()
 
+    def update_response(self, text: str):
+        """Append streaming text chunk."""
+        self._response_text = text
+        self._response_label.setText(text)
+
+    def append_response_chunk(self, chunk: str):
+        self._response_text += chunk
+        self._response_label.setText(self._response_text)
+
+    def set_audio_level(self, rms: float):
+        self._waveform.set_level(rms)
+
+    def clear_response(self):
+        self._response_text = ""
+        self._response_label.setText("")
+
+    def show_copilot_code(self, user_code: str, verification_uri: str):
+        """Thread-safe: can be called from any thread. Emits a queued signal
+        so the UI update always runs on the Qt main thread."""
+        self._sig_copilot_code.emit(user_code, verification_uri)
+
+    def show_copilot_error(self, error: str):
+        """Thread-safe version of showing a Copilot login error."""
+        self._sig_copilot_error.emit(error)
+
+    # ── Private slots (always run on Qt main thread) ──────────────────────────
+
+    def _on_copilot_code(self, user_code: str, verification_uri: str):
+        self.show()   # bring panel to front
+        self.raise_()
+        self._response_text = (
+            "── GitHub Copilot Sign-In ──\n\n"
+            f"1.  Open:  {verification_uri}\n\n"
+            f"2.  Enter code:\n\n"
+            f"        {user_code}\n\n"
+            "3.  Click Authorize in GitHub.\n\n"
+            "ScreenGuide will sign in automatically once you authorize."
+        )
+        self._response_label.setText(self._response_text)
+        self._status_label.setText("Waiting for Copilot authorization…")
+
+    def _on_copilot_error(self, error: str):
+        self._response_text = f"Copilot login failed:\n\n{error}"
+        self._response_label.setText(self._response_text)
+
+    # ── Mouse drag to reposition ──────────────────────────────────────────────
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+
