@@ -107,3 +107,59 @@ def trim_silence(pcm_data: bytes, threshold: float = 0.008, pad_ms: int = 150) -
     trimmed = audio[start:end]
     return (trimmed * 32767).astype(np.int16).tobytes()
 
+
+def resample_pcm(pcm_data: bytes, from_rate: int, to_rate: int = SAMPLE_RATE) -> bytes:
+    """
+    Linear-interpolation resample (no scipy dependency). Used when a mic's
+    native sample rate isn't 16kHz and the device can't be opened directly
+    at 16kHz — keeps Whisper input consistent regardless of mic hardware.
+    """
+    if from_rate == to_rate:
+        return pcm_data
+    audio = np.frombuffer(pcm_data, dtype=np.int16).astype(np.float32)
+    duration = len(audio) / from_rate
+    n_out = int(duration * to_rate)
+    if n_out <= 0:
+        return pcm_data
+    x_old = np.linspace(0, duration, num=len(audio), endpoint=False)
+    x_new = np.linspace(0, duration, num=n_out, endpoint=False)
+    resampled = np.interp(x_new, x_old, audio)
+    return resampled.astype(np.int16).tobytes()
+
+
+def normalize_audio(pcm_data: bytes, target_rms: float = 0.15) -> bytes:
+    """
+    Auto-gain: boosts quiet mics so Whisper gets a consistent volume level.
+    Scales int16 PCM so its RMS matches target_rms, capped to avoid clipping.
+    No-op on silence (avoids amplifying noise floor).
+    """
+    audio = np.frombuffer(pcm_data, dtype=np.int16).astype(np.float32) / 32768.0
+    rms = float(np.sqrt(np.mean(audio ** 2))) if len(audio) else 0.0
+    if rms < 1e-4:
+        return pcm_data  # silence — nothing to boost
+    gain = min(target_rms / rms, 8.0)  # cap gain to avoid amplifying noise/clipping
+    boosted = np.clip(audio * gain, -1.0, 1.0)
+    return (boosted * 32767).astype(np.int16).tobytes()
+
+
+def pcm16_to_wav(pcm_data: bytes, sample_rate: int = SAMPLE_RATE) -> bytes:
+    """Wraps raw PCM16 bytes in a WAV container, after noise-gate and
+    auto-gain normalization. (Silence trimming is applied separately by
+    callers that record full utterances — see trim_silence — since the
+    wake-word path intentionally pads short clips with silence.)"""
+    pcm_data = apply_noise_gate(pcm_data)
+    pcm_data = normalize_audio(pcm_data)
+    import struct
+    channels = 1
+    bits = 16
+    byte_rate = sample_rate * channels * bits // 8
+    block_align = channels * bits // 8
+    data_size = len(pcm_data)
+    header = struct.pack(
+        "<4sI4s4sIHHIIHH4sI",
+        b"RIFF", 36 + data_size, b"WAVE",
+        b"fmt ", 16, 1, channels, sample_rate,
+        byte_rate, block_align, bits,
+        b"data", data_size,
+    )
+    return header + pcm_data
