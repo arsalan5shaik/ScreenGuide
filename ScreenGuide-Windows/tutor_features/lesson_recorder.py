@@ -51,3 +51,54 @@ class LessonRecorder:
         except ImportError:
             return None
 
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self._out_dir = Path.home() / "Documents" / "ScreenGuide Lessons" / ts
+        self._out_dir.mkdir(parents=True, exist_ok=True)
+
+        with mss.mss() as sct:
+            mon = sct.monitors[1]      # primary
+            w, h = mon["width"], mon["height"]
+
+        self._writer = imageio.get_writer(
+            str(self._out_dir / "lesson.mp4"),
+            fps=FPS,
+            codec="libx264",
+            quality=7,
+            macro_block_size=None,
+        )
+        self._md_lines = [f"# ScreenGuide Lesson — {ts}", ""]
+        self._t0 = time.monotonic()
+        self._stop_evt.clear()
+        self.is_recording = True
+
+        self._thread = threading.Thread(target=self._loop, daemon=True)
+        self._thread.start()
+        return self._out_dir
+
+    def stop(self) -> Optional[Path]:
+        """Stop and flush. Returns the output directory."""
+        if not self.is_recording:
+            return None
+        self._stop_evt.set()
+        if self._thread:
+            self._thread.join(timeout=3.0)
+        if self._writer:
+            try:
+                self._writer.close()
+            except Exception:
+                pass
+            self._writer = None
+        if self._out_dir:
+            (self._out_dir / "transcript.md").write_text(
+                "\n".join(self._md_lines), encoding="utf-8"
+            )
+        self.is_recording = False
+        return self._out_dir
+
+    # ── Transcript hooks (manager calls these) ──────────────────────────────
+
+    def log_question(self, q: str):
+        if self.is_recording:
+            t = time.monotonic() - self._t0
+            self._md_lines.append(f"\n## [{t:6.1f}s] Q: {q}\n")
+
