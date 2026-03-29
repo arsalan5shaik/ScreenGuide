@@ -222,3 +222,47 @@ class AmbientListener:
         t = threading.Thread(target=self._check_wake, args=(pcm,), daemon=True)
         t.start()
 
+    def _check_wake(self, pcm: bytes):
+        try:
+            text = self._transcribe_tiny(pcm).lower().strip()
+            if not text:
+                return
+            if any(w in text for w in WAKE_WORDS):
+                self._on_wake()
+        except Exception:
+            pass
+        finally:
+            self._wake_inflight = False
+
+    def _transcribe_tiny(self, pcm: bytes) -> str:
+        """Pad PCM with silence (whisper accuracy degrades on ultra-short clips)."""
+        import tempfile, os
+        model = self._get_model()
+        pad = bytes(int(SAMPLE_RATE * 0.4) * 2)    # 400ms silence each side
+        padded = pad + pcm + pad
+        wav = pcm16_to_wav(padded)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(wav)
+            path = f.name
+        try:
+            segments, _ = model.transcribe(
+                path,
+                beam_size=5,
+                language="en",
+                condition_on_previous_text=False,
+                no_speech_threshold=0.45,
+                temperature=0.0,
+                initial_prompt="ScreenGuide is a helpful AI assistant.",
+            )
+            return " ".join(s.text for s in segments)
+        finally:
+            os.unlink(path)
+
+    def _get_model(self):
+        with self._wake_lock:
+            if self._wake_model is None:
+                from faster_whisper import WhisperModel
+                self._wake_model = WhisperModel(
+                    "tiny.en", device="cpu", compute_type="int8"
+                )
+            return self._wake_model
