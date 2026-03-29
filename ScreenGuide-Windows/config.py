@@ -117,3 +117,60 @@ class Config:
     ollama_vision_model: str = field(default_factory=lambda: os.getenv("OLLAMA_VISION_MODEL", "") or os.getenv("OLLAMA_MODEL", "llama3.2-vision"))
     ollama_text_model:   str = field(default_factory=lambda: os.getenv("OLLAMA_TEXT_MODEL", "") or "llama3.2:3b")
 
+    # LM Studio — local OpenAI-compatible server (Developer tab → Start Server).
+    # No key needed. Leave LMSTUDIO_MODEL empty to use whatever's loaded.
+    lmstudio_host: str = field(default_factory=lambda: os.getenv("LMSTUDIO_HOST", "http://localhost:1234/v1"))
+    lmstudio_model: str = field(default_factory=lambda: os.getenv("LMSTUDIO_MODEL", ""))
+
+    # STT
+    deepgram_api_key: Optional[str] = field(default_factory=lambda: os.getenv("DEEPGRAM_API_KEY") or None)
+    whisper_model: str = field(default_factory=lambda: os.getenv("WHISPER_MODEL", "base"))
+    # ISO code (e.g. "de", "en"). Empty = auto-detect language per utterance.
+    whisper_language: str = field(default_factory=lambda: os.getenv("WHISPER_LANGUAGE", ""))
+    # sounddevice input device index. Empty/unset = system default mic.
+    mic_device_index: Optional[int] = field(default_factory=lambda: (
+        int(v) if (v := os.getenv("MIC_DEVICE_INDEX", "").strip()) else None
+    ))
+    # Fixed reply language (ISO 639-1, e.g. "de"). Empty = auto-detect per
+    # message (can mix languages if transcription is inconsistent).
+    response_language: str = field(default_factory=lambda: os.getenv("RESPONSE_LANGUAGE", ""))
+    # User-defined scope/rules appended to every system prompt (e.g. "only
+    # help with Excel, refuse anything else"). Empty = no restriction.
+    custom_instructions: str = field(default_factory=lambda: os.getenv(
+        "CUSTOM_INSTRUCTIONS", DEFAULT_SYSTEM_PROMPT
+    ).replace("\\n", "\n"))
+
+    # TTS
+    elevenlabs_api_key: Optional[str] = field(default_factory=lambda: os.getenv("ELEVENLABS_API_KEY") or None)
+    elevenlabs_voice_id: str = field(default_factory=lambda: os.getenv("ELEVENLABS_VOICE_ID", ""))
+
+    # Search
+    tavily_api_key: Optional[str] = field(default_factory=lambda: os.getenv("TAVILY_API_KEY") or None)
+
+    # App
+    # Push-to-talk. Two-key modifier combo — no clash with app shortcuts and
+    # easier to hold than a 3-key chord. Override with SCREENGUIDE_HOTKEY in .env.
+    hotkey: str = field(default_factory=lambda: os.getenv("SCREENGUIDE_HOTKEY", "ctrl+win"))
+
+    def llm_provider(self) -> str:
+        """Returns the active LLM provider (runtime override > priority chain).
+
+        Priority chain: Claude > OpenAI > GitHub Copilot > Gemini > Ollama.
+        """
+        override = os.environ.get("SCREENGUIDE_ACTIVE_LLM", "").strip().lower()
+        if override in self.available_llm_providers():
+            return override
+        if self.anthropic_api_key:
+            return "claude"
+        if self.openai_api_key:
+            return "openai"
+        try:
+            from ai.github_copilot_provider import is_authenticated as _gh_ok
+            if _gh_ok():
+                return "copilot"
+        except Exception:
+            pass
+        if self.google_api_key:
+            return "gemini"
+        return "ollama"
+
