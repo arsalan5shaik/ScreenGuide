@@ -332,3 +332,58 @@ class CompanionManager(QObject):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
+    def start(self):
+        try:
+            self._listener.start()
+        except Exception as e:
+            self.sig_error.emit(f"Mic error: {e}")
+        # Sleep/wake watchdog — restarts mic + loop after system resume
+        self._start_sleep_watchdog()
+        # On startup, refresh any stale model cache in the background.
+        # 30-day TTL means this is a once-a-month no-op for most launches.
+        self._submit(self._refresh_stale_models())
+
+    async def _refresh_stale_models(self):
+        try:
+            from ai.model_registry import refresh_all_stale
+            results = await refresh_all_stale()
+            for prov, count in results.items():
+                if count > 0:
+                    self.sig_models_refreshed.emit(prov, count)
+        except Exception:
+            pass   # silent — not user-facing on startup
+
+    def shutdown(self):
+        # Kill any audio that was playing when the user clicked Quit
+        try:
+            from audio.playback import stop_audio
+            stop_audio()
+        except Exception:
+            pass
+        self._listener.stop()
+        if self._loop and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._loop.stop)
+
+    def _run_loop(self):
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_forever()
+
+    # ── Sleep/wake watchdog ───────────────────────────────────────────────────
+
+    def _start_sleep_watchdog(self):
+        """Background thread that detects system resume after sleep/hibernate
+        and restarts the mic stream + asyncio loop so the panel stays live."""
+        def _watch():
+            HEARTBEAT = 5.0          # check every 5 s
+            DRIFT_THRESHOLD = 15.0   # if we wake and >15 s have passed, resume occurred
+            last_tick = time.monotonic()
+            while True:
+                time.sleep(HEARTBEAT)
+                now = time.monotonic()
+                drift = now - last_tick - HEARTBEAT
+                last_tick = now
+                if drift > DRIFT_THRESHOLD:
+                    # System was sleeping — restart subsystems
+                    self._on_system_resume()
+
