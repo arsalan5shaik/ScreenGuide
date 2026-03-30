@@ -240,3 +240,71 @@ struct CompanionPanelView: View {
         }
     }
 
+    // MARK: - Permissions
+
+    private var settingsSection: some View {
+        VStack(spacing: 2) {
+            Text("PERMISSIONS")
+                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .foregroundColor(DS.Colors.textTertiary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 6)
+
+            microphonePermissionRow
+
+            accessibilityPermissionRow
+
+            screenRecordingPermissionRow
+
+            if companionManager.hasScreenRecordingPermission {
+                screenContentPermissionRow
+            }
+
+        }
+    }
+
+    private var accessibilityPermissionRow: some View {
+        let isGranted = companionManager.hasAccessibilityPermission
+        return HStack {
+            HStack(spacing: 8) {
+                Image(systemName: "hand.raised")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(isGranted ? DS.Colors.textTertiary : DS.Colors.warning)
+                    .frame(width: 16)
+
+                Text("Accessibility")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(DS.Colors.textSecondary)
+            }
+
+            Spacer()
+
+            if isGranted {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(DS.Colors.success)
+                        .frame(width: 6, height: 6)
+                    Text("Granted")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(DS.Colors.success)
+                }
+            } else {
+                HStack(spacing: 6) {
+                    Button(action: {
+                        // Triggers the system accessibility prompt (AXIsProcessTrustedWithOptions)
+                        // on first attempt, then opens System Settings on subsequent attempts.
+                        WindowPositionManager.requestAccessibilityPermission()
+                    }) {
+                        Text("Grant")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(DS.Colors.textOnAccent)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .fill(DS.Colors.accent)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+
