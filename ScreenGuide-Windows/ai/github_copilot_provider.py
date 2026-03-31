@@ -187,3 +187,62 @@ async def device_login(open_browser: bool = True,
                 raise RuntimeError(f"Copilot login failed: {body.get('error')}")
             _log_login(f"poll #{poll_count}: unexpected body keys={list(body.keys())}")
 
+    _log_login(f"❌ Timed out after {poll_count} polls.")
+    raise TimeoutError("Copilot device-flow login timed out.")
+
+
+def load_github_token() -> Optional[str]:
+    p = _token_path()
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text()).get("access_token")
+    except Exception:
+        return None
+
+
+def is_authenticated() -> bool:
+    return load_github_token() is not None
+
+
+# ─── Live model discovery ─────────────────────────────────────────────────────
+#
+# GitHub Copilot exposes `GET /models` which returns every model the user's
+# Copilot seat can currently access, along with its billing multiplier
+# (0 = free / does not burn a premium request, ≥1 = consumes premium quota).
+#
+# We auto-refresh this list whenever:
+#   • cache is older than MODEL_CACHE_TTL_SECONDS
+#   • user signs in via device flow
+#   • user clicks "Refresh Copilot models" in the tray menu
+#   • user switches to Copilot from another provider
+
+async def fetch_copilot_token_only() -> str:
+    """Exchange the GitHub OAuth token for a Copilot session token (one-shot)."""
+    gh = load_github_token()
+    if not gh:
+        raise RuntimeError("Not signed in to GitHub Copilot.")
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(
+            COPILOT_TOKEN_URL,
+            headers={
+                "Authorization": f"token {gh}",
+                "Editor-Version": EDITOR_VERSION,
+                "Editor-Plugin-Version": EDITOR_PLUGIN,
+                "User-Agent": USER_AGENT,
+            },
+        )
+    if r.status_code == 401:
+        raise RuntimeError(
+            "GitHub rejected your token (401). Re-run the login from "
+            "Tray → Model → Sign in to GitHub Copilot…"
+        )
+    if r.status_code == 403:
+        raise RuntimeError(
+            "Your GitHub account doesn't have an active Copilot subscription "
+            "(403). Verify at https://github.com/settings/copilot — Free, Pro, "
+            "and Education seats all work; the seat just needs to be active."
+        )
+    r.raise_for_status()
+    return r.json()["token"]
+
