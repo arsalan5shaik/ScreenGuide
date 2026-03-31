@@ -53,3 +53,53 @@ final class AssemblyAIStreamingTranscriptionProvider: BuddyTranscriptionProvider
             onError: onError
         )
 
+        try await session.open()
+        return session
+    }
+
+    /// Calls the Cloudflare Worker to get a short-lived AssemblyAI token.
+    private func fetchTemporaryToken() async throws -> String {
+        var request = URLRequest(url: URL(string: Self.tokenProxyURL)!)
+        request.httpMethod = "POST"
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let body = String(data: data, encoding: .utf8) ?? "unknown"
+            throw AssemblyAIStreamingTranscriptionProviderError(
+                message: "Failed to fetch AssemblyAI token (HTTP \(statusCode)): \(body)"
+            )
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let token = json["token"] as? String else {
+            throw AssemblyAIStreamingTranscriptionProviderError(
+                message: "Invalid token response from proxy."
+            )
+        }
+
+        return token
+    }
+}
+
+private final class AssemblyAIStreamingTranscriptionSession: NSObject, BuddyStreamingTranscriptionSession {
+    private struct MessageEnvelope: Decodable {
+        let type: String
+    }
+
+    private struct TurnMessage: Decodable {
+        let type: String
+        let transcript: String?
+        let turn_order: Int?
+        let end_of_turn: Bool?
+        let turn_is_formatted: Bool?
+    }
+
+    private struct ErrorMessage: Decodable {
+        let type: String
+        let error: String?
+        let message: String?
+    }
+
