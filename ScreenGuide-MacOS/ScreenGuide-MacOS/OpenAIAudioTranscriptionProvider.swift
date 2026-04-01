@@ -209,3 +209,54 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
             return transcriptionResponse.text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
+        let responseText = String(data: responseData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        if !responseText.isEmpty {
+            return responseText
+        }
+
+        throw OpenAIAudioTranscriptionProviderError(
+            message: "OpenAI transcription returned an empty transcript."
+        )
+    }
+
+    private func makeMultipartRequestBody(
+        boundary: String,
+        wavAudioData: Data
+    ) -> Data {
+        var requestBodyData = Data()
+
+        requestBodyData.appendMultipartFormField(
+            named: "model",
+            value: modelName,
+            usingBoundary: boundary
+        )
+        requestBodyData.appendMultipartFormField(
+            named: "language",
+            value: "en",
+            usingBoundary: boundary
+        )
+        requestBodyData.appendMultipartFormField(
+            named: "response_format",
+            value: "json",
+            usingBoundary: boundary
+        )
+
+        if let contextualPrompt = transcriptionPromptText() {
+            requestBodyData.appendMultipartFormField(
+                named: "prompt",
+                value: contextualPrompt,
+                usingBoundary: boundary
+            )
+        }
+
+        requestBodyData.appendMultipartFileField(
+            named: "file",
+            filename: "voice-input.wav",
+            mimeType: "audio/wav",
+            fileData: wavAudioData,
+            usingBoundary: boundary
+        )
+        requestBodyData.appendString("--\(boundary)--\r\n")
+
