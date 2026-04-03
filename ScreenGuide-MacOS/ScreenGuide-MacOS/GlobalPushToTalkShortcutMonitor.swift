@@ -108,3 +108,25 @@ final class GlobalPushToTalkShortcutMonitor: ObservableObject {
             return Unmanaged.passUnretained(event)
         }
 
+        let eventKeyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
+        let shortcutTransition = BuddyPushToTalkShortcut.shortcutTransition(
+            for: eventType,
+            keyCode: eventKeyCode,
+            modifierFlagsRawValue: event.flags.rawValue,
+            wasShortcutPreviouslyPressed: isShortcutCurrentlyPressed
+        )
+
+        switch shortcutTransition {
+        case .none:
+            break
+        case .pressed:
+            isShortcutCurrentlyPressed = true
+            shortcutTransitionPublisher.send(.pressed)
+        case .released:
+            isShortcutCurrentlyPressed = false
+            shortcutTransitionPublisher.send(.released)
+        }
+
+        return Unmanaged.passUnretained(event)
+    }
+}
