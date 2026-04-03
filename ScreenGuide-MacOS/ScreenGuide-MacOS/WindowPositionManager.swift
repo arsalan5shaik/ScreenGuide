@@ -116,3 +116,58 @@ class WindowPositionManager {
             hasAttemptedSystemPrompt: hasAttemptedScreenRecordingSystemPromptDuringCurrentLaunch
         )
 
+        switch presentationDestination {
+        case .alreadyGranted:
+            return .alreadyGranted
+        case .systemPrompt:
+            hasAttemptedScreenRecordingSystemPromptDuringCurrentLaunch = true
+            _ = CGRequestScreenCaptureAccess()
+        case .systemSettings:
+            openScreenRecordingSettings()
+        }
+
+        return presentationDestination
+    }
+
+    /// Opens System Settings to the Screen Recording pane.
+    static func openScreenRecordingSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else { return }
+        NSWorkspace.shared.open(url)
+    }
+
+    static func permissionRequestPresentationDestination(
+        hasPermissionNow: Bool,
+        hasAttemptedSystemPrompt: Bool
+    ) -> PermissionRequestPresentationDestination {
+        if hasPermissionNow {
+            return .alreadyGranted
+        }
+
+        if hasAttemptedSystemPrompt {
+            return .systemSettings
+        }
+
+        return .systemPrompt
+    }
+
+    // MARK: - Window Positioning
+
+    /// Positions the app's main window pinned to the right edge of the screen
+    /// that contains the given display ID, vertically centered.
+    static func pinMainWindowToRight(onDisplayID displayID: CGDirectDisplayID?) {
+        guard let mainWindow = NSApp.windows.first(where: { !($0 is NSPanel) }) else { return }
+
+        // Find the NSScreen matching the selected display, or fall back to the screen
+        // the window is currently on, or finally the main screen.
+        let targetScreen: NSScreen
+        if let displayID,
+           let matchingScreen = NSScreen.screens.first(where: { $0.displayID == displayID }) {
+            targetScreen = matchingScreen
+        } else if let currentScreen = mainWindow.screen {
+            targetScreen = currentScreen
+        } else if let mainScreen = NSScreen.main {
+            targetScreen = mainScreen
+        } else {
+            return
+        }
+
