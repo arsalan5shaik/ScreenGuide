@@ -107,3 +107,41 @@ private final class AppleSpeechTranscriptionSession: NSObject, BuddyStreamingTra
         recognitionRequest.endAudio()
     }
 
+    func cancel() {
+        recognitionTask?.cancel()
+        recognitionTask = nil
+    }
+
+    private func handleRecognitionEvent(
+        result: SFSpeechRecognitionResult?,
+        error: Error?
+    ) {
+        if let result {
+            latestRecognizedText = result.bestTranscription.formattedString
+            onTranscriptUpdate(latestRecognizedText)
+
+            if result.isFinal {
+                deliverFinalTranscriptIfNeeded(latestRecognizedText)
+                return
+            }
+        }
+
+        guard let error else { return }
+
+        if hasRequestedFinalTranscript && !latestRecognizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            deliverFinalTranscriptIfNeeded(latestRecognizedText)
+        } else {
+            onError(error)
+        }
+    }
+
+    private func deliverFinalTranscriptIfNeeded(_ transcriptText: String) {
+        guard !hasDeliveredFinalTranscript else { return }
+        hasDeliveredFinalTranscript = true
+        onFinalTranscriptReady(transcriptText)
+    }
+
+    deinit {
+        cancel()
+    }
+}
