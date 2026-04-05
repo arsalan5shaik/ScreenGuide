@@ -212,3 +212,57 @@ async def _ask_grid_pick(
     except Exception:
         return None
 
+    reply = "".join(chunks)
+    n = _parse_cell_number(reply, max_n)
+    if n == 0:
+        return None
+    return n
+
+
+# ─── Main entry ───────────────────────────────────────────────────────────────
+
+async def detect_element_universal(
+    *,
+    llm: BaseLLMProvider,
+    screenshot_jpeg_b64: str,
+    original_width: int,           # downscaled JPEG width
+    original_height: int,          # downscaled JPEG height
+    screen_index: int,
+    user_question: str,
+    model: str | None = None,
+    physical_width: int | None = None,
+    physical_height: int | None = None,
+    physical_left: int = 0,
+    physical_top: int = 0,
+    dpi_scale: float = 1.0,
+) -> Optional[Detected]:
+    """Locate the UI element matching `user_question` using ANY vision LLM.
+
+    Returns coordinates in **logical screen space** (same as QCursor.pos()),
+    or None if the model couldn't pick a cell or the question is conceptual.
+    """
+    # Decode + downscale to inference size
+    raw_bytes = base64.b64decode(screenshot_jpeg_b64)
+    full_img = Image.open(io.BytesIO(raw_bytes)).convert("RGB")
+    fw, fh = full_img.size
+
+    if physical_width is None:
+        physical_width = original_width
+    if physical_height is None:
+        physical_height = original_height
+
+    # Scale factor: from infer-image px → original JPEG px → physical px
+    scale_w = MAX_INFERENCE_WIDTH / fw if fw > MAX_INFERENCE_WIDTH else 1.0
+    iw = int(fw * scale_w)
+    ih = int(fh * scale_w)
+    infer_img = full_img.resize((iw, ih), Image.Resampling.LANCZOS) if scale_w != 1.0 else full_img
+
+    # ── Stage 1 ─────────────────────────────────────────────────────────
+    s1_img = _draw_grid(infer_img, STAGE1_COLS, STAGE1_ROWS)
+    s1_b64 = _img_to_jpeg_b64(s1_img, quality=80)
+
+    s1_max = STAGE1_COLS * STAGE1_ROWS
+    s1_pick = await _ask_grid_pick(llm, s1_b64, user_question, s1_max, model=model)
+    if s1_pick is None:
+        return None
+
