@@ -102,3 +102,33 @@ class LessonRecorder:
             t = time.monotonic() - self._t0
             self._md_lines.append(f"\n## [{t:6.1f}s] Q: {q}\n")
 
+    def log_answer(self, a: str):
+        if self.is_recording:
+            self._md_lines.append(f"**A:** {a.strip()}\n")
+
+    # ── Internal ────────────────────────────────────────────────────────────
+
+    def _loop(self):
+        with mss.mss() as sct:
+            mon = sct.monitors[1]
+            interval = 1.0 / FPS
+            next_t = time.monotonic()
+            while not self._stop_evt.is_set():
+                try:
+                    raw = sct.grab(mon)
+                    img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
+                    if self._writer is not None:
+                        self._writer.append_data(_to_array(img))
+                except Exception:
+                    pass
+                next_t += interval
+                sleep_left = next_t - time.monotonic()
+                if sleep_left > 0:
+                    time.sleep(sleep_left)
+                else:
+                    next_t = time.monotonic()
+
+
+def _to_array(img: Image.Image):
+    import numpy as np
+    return np.array(img)
