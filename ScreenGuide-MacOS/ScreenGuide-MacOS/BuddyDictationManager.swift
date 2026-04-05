@@ -321,3 +321,56 @@ final class BuddyDictationManager: NSObject, ObservableObject {
         )
     }
 
+    func stopPersistentDictationFromMicrophoneButton() {
+        stopPushToTalk(expectedStartSource: .microphoneButton)
+    }
+
+    func stopPushToTalkFromKeyboardShortcut() {
+        stopPushToTalk(expectedStartSource: .keyboardShortcut)
+    }
+
+    func cancelCurrentDictation(preserveDraftText: Bool = true) {
+        pendingStartRequestIdentifier = UUID()
+
+        guard isDictationInProgress else { return }
+
+        finalizeFallbackWorkItem?.cancel()
+        finalizeFallbackWorkItem = nil
+
+        if preserveDraftText {
+            let currentDraftText = composeDraftText(withTranscribedText: latestRecognizedText)
+            draftCallbacks?.updateDraftText(currentDraftText)
+        }
+
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        activeTranscriptionSession?.cancel()
+
+        resetSessionState()
+    }
+
+    func requestInitialPushToTalkPermissionsIfNeeded() async {
+        guard needsInitialPermissionPrompt else { return }
+        guard !isDictationInProgress else { return }
+
+        lastErrorMessage = nil
+        currentPermissionProblem = nil
+        isPreparingToRecord = true
+
+        NSApplication.shared.activate(ignoringOtherApps: true)
+
+        do {
+            try await Task.sleep(for: .milliseconds(200))
+        } catch {
+            // If the task is cancelled while we are waiting for macOS to bring
+            // the app forward, we can safely continue into the permission check.
+        }
+
+        let hasPermissions = await requestMicrophoneAndSpeechPermissionsWithoutDuplicatePrompts()
+        isPreparingToRecord = false
+
+        if hasPermissions {
+            lastErrorMessage = nil
+        }
+    }
+
