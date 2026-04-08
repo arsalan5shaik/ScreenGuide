@@ -212,3 +212,53 @@ def _find_via_ocr(query: str, screenshot_path: Optional[str] = None,
                 from PIL import Image
                 pil_image = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
 
+        import numpy as np
+        if pil_image is not None:
+            img_arr = np.array(pil_image)
+        else:
+            img_arr = screenshot_path  # RapidOCR accepts paths directly
+
+        result, _ = ocr(img_arr)
+        if not result:
+            log.debug("OCR returned no detections")
+            return None
+
+        best: Optional[Tuple[float, dict]] = None
+        for det in result:
+            # RapidOCR format: [bbox(4 corners), text, score]
+            try:
+                box, text, conf = det
+            except Exception:
+                continue
+            if conf < 0.4:
+                continue
+            score = _score_match(query, text, "")
+            if score >= min_score and (best is None or score > best[0]):
+                # Compute bbox from 4 corners
+                xs = [int(p[0]) for p in box]
+                ys = [int(p[1]) for p in box]
+                best = (score, {
+                    "text": text,
+                    "bbox": (min(xs), min(ys), max(xs), max(ys)),
+                    "conf": conf,
+                })
+
+        if not best:
+            log.debug("OCR: no text matched %r", query)
+            return None
+
+        score, hit = best
+        l, t, r, b = hit["bbox"]
+        cx, cy = (l + r) // 2, (t + b) // 2
+        log.info("OCR hit: %r -> %r @ (%d,%d) score=%.2f",
+                 query, hit["text"], cx, cy, score)
+        return Target(
+            x=cx, y=cy, bbox=hit["bbox"],
+            label=hit["text"], source="ocr",
+            confidence=score * hit["conf"],
+        )
+    except Exception as e:
+        log.warning("OCR tier failed: %s", e)
+        return None
+
+
