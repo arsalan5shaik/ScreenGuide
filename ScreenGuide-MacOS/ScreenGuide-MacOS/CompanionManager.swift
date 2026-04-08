@@ -103,3 +103,54 @@ final class CompanionManager: ObservableObject {
         hasAccessibilityPermission && hasScreenRecordingPermission && hasMicrophonePermission && hasScreenContentPermission
     }
 
+    /// Whether the blue cursor overlay is currently visible on screen.
+    /// Used by the panel to show accurate status text ("Active" vs "Ready").
+    @Published private(set) var isOverlayVisible: Bool = false
+
+    /// The Claude model used for voice responses. Persisted to UserDefaults.
+    @Published var selectedModel: String = UserDefaults.standard.string(forKey: "selectedClaudeModel") ?? "claude-sonnet-4-6"
+
+    func setSelectedModel(_ model: String) {
+        selectedModel = model
+        UserDefaults.standard.set(model, forKey: "selectedClaudeModel")
+        claudeAPI.model = model
+    }
+
+    /// User preference for whether the ScreenGuide cursor should be shown.
+    /// When toggled off, the overlay is hidden and push-to-talk is disabled.
+    /// Persisted to UserDefaults so the choice survives app restarts.
+    @Published var isScreenGuideCursorEnabled: Bool = UserDefaults.standard.object(forKey: "isScreenGuideCursorEnabled") == nil
+        ? true
+        : UserDefaults.standard.bool(forKey: "isScreenGuideCursorEnabled")
+
+    func setScreenGuideCursorEnabled(_ enabled: Bool) {
+        isScreenGuideCursorEnabled = enabled
+        UserDefaults.standard.set(enabled, forKey: "isScreenGuideCursorEnabled")
+        transientHideTask?.cancel()
+        transientHideTask = nil
+
+        if enabled {
+            overlayWindowManager.hasShownOverlayBefore = true
+            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+            isOverlayVisible = true
+        } else {
+            overlayWindowManager.hideOverlay()
+            isOverlayVisible = false
+        }
+    }
+
+    /// Whether the user has completed onboarding at least once. Persisted
+    /// to UserDefaults so the Start button only appears on first launch.
+    var hasCompletedOnboarding: Bool {
+        get { UserDefaults.standard.bool(forKey: "hasCompletedOnboarding") }
+        set { UserDefaults.standard.set(newValue, forKey: "hasCompletedOnboarding") }
+    }
+
+    /// Whether the user has submitted their email during onboarding.
+    @Published var hasSubmittedEmail: Bool = UserDefaults.standard.bool(forKey: "hasSubmittedEmail")
+
+    /// Submits the user's email to FormSpark and identifies them in PostHog.
+    func submitEmail(_ email: String) {
+        let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedEmail.isEmpty else { return }
+
