@@ -387,3 +387,73 @@ class CompanionManager(QObject):
                     # System was sleeping — restart subsystems
                     self._on_system_resume()
 
+        t = threading.Thread(target=_watch, daemon=True)
+        t.start()
+
+    def _on_system_resume(self):
+        """Called automatically after the laptop wakes from sleep."""
+        # 1. Restart the mic stream (sounddevice handles become stale on resume)
+        try:
+            self._listener.stop()
+        except Exception:
+            pass
+        time.sleep(1.0)   # give Windows audio stack time to reinit
+        try:
+            self._listener.start()
+        except Exception as e:
+            self.sig_error.emit(f"Mic restart after sleep failed: {e}")
+
+        # 2. If the asyncio loop thread died, restart it
+        if not self._thread.is_alive():
+            self._thread = threading.Thread(target=self._run_loop, daemon=True)
+            self._thread.start()
+
+        # 3. Reset state to IDLE so the panel shows the correct status
+        if self._state != AppState.IDLE:
+            self._emit_state(AppState.IDLE)
+
+    def _submit(self, coro):
+        if not self._loop:
+            return
+        fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
+
+        def _observe(f):
+            try:
+                f.result()
+            except Exception as e:
+                # A swallowed exception here used to leave the UI stuck on
+                # "Listening..." forever. Surface it and always return to idle.
+                _log.exception("background task failed: %s", e)
+                try:
+                    self.sig_error.emit(str(e))
+                    self._emit_state(AppState.IDLE)
+                except Exception:
+                    pass
+        fut.add_done_callback(_observe)
+
+    # ── Provider lazy init ────────────────────────────────────────────────────
+
+    def _get_llm(self) -> BaseLLMProvider:
+        if self._llm is None:
+            provider = cfg.llm_provider()
+            if provider == "claude":
+                from ai.claude_provider import ClaudeProvider
+                self._llm = ClaudeProvider()
+            elif provider == "openai":
+                from ai.openai_provider import OpenAIProvider
+                self._llm = OpenAIProvider()
+            elif provider == "gemini":
+                from ai.gemini_provider import GeminiProvider
+                self._llm = GeminiProvider()
+            elif provider == "copilot":
+                from ai.github_copilot_provider import GitHubCopilotProvider
+                self._llm = GitHubCopilotProvider()
+            elif provider == "lmstudio":
+                from ai.lmstudio_provider import LMStudioProvider
+                self._llm = LMStudioProvider()
+            else:
+                _ensure_ollama_running()
+                from ai.ollama_provider import OllamaProvider
+                self._llm = OllamaProvider()
+        return self._llm
+
