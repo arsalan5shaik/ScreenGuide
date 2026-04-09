@@ -308,3 +308,85 @@ struct CompanionPanelView: View {
                     .buttonStyle(.plain)
                     .pointerCursor()
 
+                    Button(action: {
+                        // Reveals the app in Finder so the user can drag it into
+                        // the Accessibility list if it doesn't appear automatically
+                        // (common with unsigned dev builds).
+                        WindowPositionManager.revealAppInFinder()
+                        WindowPositionManager.openAccessibilitySettings()
+                    }) {
+                        Text("Find App")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(DS.Colors.textSecondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule()
+                                    .stroke(DS.Colors.borderSubtle, lineWidth: 0.8)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .pointerCursor()
+                }
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private var screenRecordingPermissionRow: some View {
+        let isGranted = companionManager.hasScreenRecordingPermission
+        return HStack {
+            HStack(spacing: 8) {
+                Image(systemName: "rectangle.dashed.badge.record")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(isGranted ? DS.Colors.textTertiary : DS.Colors.warning)
+                    .frame(width: 16)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Screen Recording")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(DS.Colors.textSecondary)
+
+                    Text(isGranted
+                         ? "Only takes a screenshot when you use the hotkey"
+                         : "Quit and reopen after granting")
+                        .font(.system(size: 10))
+                        .foregroundColor(DS.Colors.textTertiary)
+                }
+            }
+
+            Spacer()
+
+            if isGranted {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(DS.Colors.success)
+                        .frame(width: 6, height: 6)
+                    Text("Granted")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(DS.Colors.success)
+                }
+            } else {
+                Button(action: {
+                    // Triggers the native macOS screen recording prompt on first
+                    // attempt (auto-adds app to the list), then opens System Settings
+                    // on subsequent attempts.
+                    WindowPositionManager.requestScreenRecordingPermission()
+                }) {
+                    Text("Grant")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(DS.Colors.textOnAccent)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(
+                            Capsule()
+                                .fill(DS.Colors.accent)
+                        )
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
