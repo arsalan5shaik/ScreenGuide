@@ -262,3 +262,58 @@ def _find_via_ocr(query: str, screenshot_path: Optional[str] = None,
         return None
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+#  TIER 3 — Vision LLM grid fallback (delegated to existing element_locator)
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _find_via_vision(query: str, screenshot, llm_provider) -> Optional[Target]:
+    """Last-resort: use the grid-locator path (element_locator.py)."""
+    try:
+        from ai.element_locator import locate_element  # v1 module
+    except ImportError:
+        log.warning("element_locator not available — Tier 3 (vision) disabled")
+        return None
+
+    try:
+        coord = locate_element(query, screenshot, llm_provider)
+        if not coord:
+            return None
+        x, y = coord
+        return Target(
+            x=x, y=y, bbox=(x - 20, y - 20, x + 20, y + 20),
+            label=query, source="vision",
+            confidence=0.5,   # vision is least trustworthy
+        )
+    except Exception as e:
+        log.warning("Vision tier failed: %s", e)
+        return None
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+#  PUBLIC API
+# ──────────────────────────────────────────────────────────────────────────────
+
+def find_target(
+    query: str,
+    *,
+    screenshot=None,
+    pil_image=None,
+    llm_provider=None,
+    skip_uia: bool = False,
+    skip_ocr: bool = False,
+    skip_vision: bool = False,
+) -> Optional[Target]:
+    """Resolve a natural-language pointing query into pixel coordinates.
+
+    Tries UIA → OCR → Vision in order. Returns the first hit with confidence
+    >= the tier's threshold. Returns None if all three tiers whiff.
+
+    Args:
+        query:        what the user asked ScreenGuide to point at (e.g. "save button",
+                      "send icon", "login text field").
+        screenshot:   ScreenShot object (from screen.capture) — used by vision tier.
+        pil_image:    PIL.Image of the full screen — used by OCR tier. Optional;
+                      OCR will capture its own if not provided.
+        llm_provider: BaseLLMProvider instance — needed only for vision fallback.
+        skip_*:       Force-skip a tier (for testing or perf-sensitive paths).
+
