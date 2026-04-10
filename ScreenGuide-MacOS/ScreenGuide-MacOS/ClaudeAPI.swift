@@ -61,3 +61,54 @@ class ClaudeAPI {
         return "image/jpeg"
     }
 
+    /// Sends a no-op HEAD request to the API host to establish and cache a TLS session.
+    /// Failures are silently ignored — this is purely an optimization.
+    private func warmUpTLSConnectionIfNeeded() {
+        Self.tlsWarmupLock.lock()
+        let shouldStartTLSWarmup = !Self.hasStartedTLSWarmup
+        if shouldStartTLSWarmup {
+            Self.hasStartedTLSWarmup = true
+        }
+        Self.tlsWarmupLock.unlock()
+
+        guard shouldStartTLSWarmup else { return }
+
+        guard var warmupURLComponents = URLComponents(url: apiURL, resolvingAgainstBaseURL: false) else {
+            return
+        }
+
+        // The TLS session ticket is host-scoped, so warming the root host is enough.
+        // Hitting the host instead of `/v1/messages` avoids extra endpoint-specific noise.
+        warmupURLComponents.path = "/"
+        warmupURLComponents.query = nil
+        warmupURLComponents.fragment = nil
+
+        guard let warmupURL = warmupURLComponents.url else {
+            return
+        }
+
+        var warmupRequest = URLRequest(url: warmupURL)
+        warmupRequest.httpMethod = "HEAD"
+        warmupRequest.timeoutInterval = 10
+        session.dataTask(with: warmupRequest) { _, _, _ in
+            // Response doesn't matter — the TLS handshake is the goal
+        }.resume()
+    }
+
+    /// Send a vision request to Claude with streaming.
+    /// Calls `onTextChunk` on the main actor each time new text arrives so the UI updates progressively.
+    /// Returns the full accumulated text and total duration when the stream completes.
+    func analyzeImageStreaming(
+        images: [(data: Data, label: String)],
+        systemPrompt: String,
+        conversationHistory: [(userPlaceholder: String, assistantResponse: String)] = [],
+        userPrompt: String,
+        onTextChunk: @MainActor @Sendable (String) -> Void
+    ) async throws -> (text: String, duration: TimeInterval) {
+        let startTime = Date()
+
+        var request = makeAPIRequest()
+
+        // Build messages array
+        var messages: [[String: Any]] = []
+
