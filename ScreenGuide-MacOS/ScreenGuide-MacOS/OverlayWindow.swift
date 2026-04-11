@@ -157,3 +157,60 @@ struct BlueCursorView: View {
     /// an energetic "swooping" feel.
     @State private var buddyFlightScale: CGFloat = 1.0
 
+    /// Scale factor for the navigation speech bubble's pop-in entrance.
+    /// Starts at 0.5 and springs to 1.0 when the first character appears.
+    @State private var navigationBubbleScale: CGFloat = 1.0
+
+    /// True when the buddy is flying BACK to the cursor after pointing.
+    /// Only during the return flight can cursor movement cancel the animation.
+    @State private var isReturningToCursor: Bool = false
+
+    // MARK: - Onboarding Video Layout
+
+    private let onboardingVideoPlayerWidth: CGFloat = 330
+    private let onboardingVideoPlayerHeight: CGFloat = 186
+
+    private let fullWelcomeMessage = "hey! i'm screenguide"
+
+    private let navigationPointerPhrases = [
+        "right here!",
+        "this one!",
+        "over here!",
+        "click this!",
+        "here it is!",
+        "found it!"
+    ]
+
+    var body: some View {
+        ZStack {
+            // Nearly transparent background (helps with compositing)
+            Color.black.opacity(0.001)
+
+            // Welcome speech bubble (first launch only)
+            if isCursorOnThisScreen && showWelcome && !welcomeText.isEmpty {
+                Text(welcomeText)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(DS.Colors.overlayCursorBlue)
+                            .shadow(color: DS.Colors.overlayCursorBlue.opacity(0.5), radius: 6, x: 0, y: 0)
+                    )
+                    .fixedSize()
+                    .overlay(
+                        GeometryReader { geo in
+                            Color.clear
+                                .preference(key: SizePreferenceKey.self, value: geo.size)
+                        }
+                    )
+                    .opacity(bubbleOpacity)
+                    .position(x: cursorPosition.x + 10 + (bubbleSize.width / 2), y: cursorPosition.y + 18)
+                    .animation(.spring(response: 0.2, dampingFraction: 0.6, blendDuration: 0), value: cursorPosition)
+                    .animation(.easeOut(duration: 0.5), value: bubbleOpacity)
+                    .onPreferenceChange(SizePreferenceKey.self) { newSize in
+                        bubbleSize = newSize
+                    }
+            }
+
