@@ -214,3 +214,83 @@ struct BlueCursorView: View {
                     }
             }
 
+            // Onboarding video — always in the view tree so opacity animation works
+            // reliably. When no player exists or opacity is 0, nothing is visible.
+            // allowsHitTesting(false) prevents it from intercepting clicks.
+            OnboardingVideoPlayerView(player: companionManager.onboardingVideoPlayer)
+                .frame(width: onboardingVideoPlayerWidth, height: onboardingVideoPlayerHeight)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .shadow(color: Color.black.opacity(0.4 * companionManager.onboardingVideoOpacity), radius: 12, x: 0, y: 6)
+                .opacity(isCursorOnThisScreen ? companionManager.onboardingVideoOpacity : 0)
+                .position(
+                    x: cursorPosition.x + 10 + (onboardingVideoPlayerWidth / 2),
+                    y: cursorPosition.y + 18 + (onboardingVideoPlayerHeight / 2)
+                )
+                .animation(.spring(response: 0.2, dampingFraction: 0.6, blendDuration: 0), value: cursorPosition)
+                .animation(.easeInOut(duration: 2.0), value: companionManager.onboardingVideoOpacity)
+                .allowsHitTesting(false)
+
+            // Onboarding prompt — "press control + option and say hi" streamed after video ends
+            if isCursorOnThisScreen && companionManager.showOnboardingPrompt && !companionManager.onboardingPromptText.isEmpty {
+                Text(companionManager.onboardingPromptText)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(DS.Colors.overlayCursorBlue)
+                            .shadow(color: DS.Colors.overlayCursorBlue.opacity(0.5), radius: 6, x: 0, y: 0)
+                    )
+                    .fixedSize()
+                    .overlay(
+                        GeometryReader { geo in
+                            Color.clear
+                                .preference(key: SizePreferenceKey.self, value: geo.size)
+                        }
+                    )
+                    .opacity(companionManager.onboardingPromptOpacity)
+                    .position(x: cursorPosition.x + 10 + (bubbleSize.width / 2), y: cursorPosition.y + 18)
+                    .animation(.spring(response: 0.2, dampingFraction: 0.6, blendDuration: 0), value: cursorPosition)
+                    .animation(.easeOut(duration: 0.4), value: companionManager.onboardingPromptOpacity)
+                    .onPreferenceChange(SizePreferenceKey.self) { newSize in
+                        bubbleSize = newSize
+                    }
+            }
+
+            // Navigation pointer bubble — shown when buddy arrives at a detected element.
+            // Pops in with a scale-bounce (0.5x → 1.0x spring) and a bright initial
+            // glow that settles, creating a "materializing" effect.
+            if buddyNavigationMode == .pointingAtTarget && !navigationBubbleText.isEmpty {
+                Text(navigationBubbleText)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(DS.Colors.overlayCursorBlue)
+                            .shadow(
+                                color: DS.Colors.overlayCursorBlue.opacity(0.5 + (1.0 - navigationBubbleScale) * 1.0),
+                                radius: 6 + (1.0 - navigationBubbleScale) * 16,
+                                x: 0, y: 0
+                            )
+                    )
+                    .fixedSize()
+                    .overlay(
+                        GeometryReader { geo in
+                            Color.clear
+                                .preference(key: NavigationBubbleSizePreferenceKey.self, value: geo.size)
+                        }
+                    )
+                    .scaleEffect(navigationBubbleScale)
+                    .opacity(navigationBubbleOpacity)
+                    .position(x: cursorPosition.x + 10 + (navigationBubbleSize.width / 2), y: cursorPosition.y + 18)
+                    .animation(.spring(response: 0.2, dampingFraction: 0.6, blendDuration: 0), value: cursorPosition)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.6), value: navigationBubbleScale)
+                    .animation(.easeOut(duration: 0.5), value: navigationBubbleOpacity)
+                    .onPreferenceChange(NavigationBubbleSizePreferenceKey.self) { newSize in
+                        navigationBubbleSize = newSize
+                    }
+            }
+
