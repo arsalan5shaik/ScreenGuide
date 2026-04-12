@@ -449,3 +449,55 @@ class CursorOverlay(QWidget):
             self.update()
             return
 
+        if self._flight_phase == _PHASE_DWELLING:
+            # Gentle breathing pulse while the LLM explains
+            breathe = 1.0 + 0.05 * math.sin(self._phase * 1.4)
+            self._flight_scale = breathe
+            self._bubble_alpha = min(1.0, self._bubble_alpha + 0.05)
+            self._bubble_scale = self._bubble_scale + (1.0 - self._bubble_scale) * 0.15
+            # Stay planted on the element
+            self._display_pos = QPointF(self._locked_pos.x(), self._locked_pos.y())
+            if time.monotonic() >= self._dwell_until:
+                cursor_target = QPointF(real.x() + OFFSET_X, real.y() + OFFSET_Y)
+                self._begin_flight(self._display_pos, cursor_target, _PHASE_RETURNING)
+                # Fade bubble out during return
+                self._bubble_alpha = 0.0
+            self._phase += 0.10
+            self.update()
+            return
+
+        # ── Drawing mode: buddy rides the pen tip of the active stroke, and
+        # holds at the last tip between strokes while the lesson is still
+        # playing (no yo-yo back to the mouse cursor mid-lesson) ──
+        tip = self._active_stroke_tip()
+        if tip is not None:
+            self._last_tip = tip
+        elif time.monotonic() >= self._draw_queue_end + 2.5:
+            self._last_tip = None   # lesson over — resume cursor follow
+        hold = tip or self._last_tip
+        if hold is not None:
+            # Strong pull toward the pen tip — smooth but keeps up with it
+            tx, ty = hold[0] + 6, hold[1] + 6
+            self._display_pos = QPointF(
+                self._display_pos.x() + (tx - self._display_pos.x()) * 0.45,
+                self._display_pos.y() + (ty - self._display_pos.y()) * 0.45,
+            )
+            self._vel = QPointF(0, 0)
+            self._phase += 0.10
+            self.update()
+            return
+
+        # ── Normal cursor-follow spring ──
+        target = QPointF(real.x() + OFFSET_X, real.y() + OFFSET_Y)
+        stiffness, damping = 0.28, 0.62
+
+        # Spring
+        ax = (target.x() - self._display_pos.x()) * stiffness
+        ay = (target.y() - self._display_pos.y()) * stiffness
+        self._vel = QPointF(self._vel.x() * damping + ax,
+                            self._vel.y() * damping + ay)
+        self._display_pos = QPointF(
+            self._display_pos.x() + self._vel.x(),
+            self._display_pos.y() + self._vel.y(),
+        )
+
