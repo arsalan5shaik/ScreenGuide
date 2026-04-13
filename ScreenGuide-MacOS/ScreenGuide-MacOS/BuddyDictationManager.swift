@@ -441,3 +441,53 @@ final class BuddyDictationManager: NSObject, ObservableObject {
         microphoneButtonRecordingStartedAt = nil
         lastRecordedAudioPowerSampleDate = .distantPast
 
+        guard !Task.isCancelled else {
+            print("🎙️ BuddyDictationManager: start cancelled (shortcut released before recording began)")
+            resetSessionState()
+            return
+        }
+
+        do {
+            try await startRecognitionSession()
+            guard !Task.isCancelled else {
+                print("🎙️ BuddyDictationManager: start cancelled (shortcut released during session start)")
+                audioEngine.stop()
+                audioEngine.inputNode.removeTap(onBus: 0)
+                activeTranscriptionSession?.cancel()
+                resetSessionState()
+                return
+            }
+            if startSource == .microphoneButton {
+                microphoneButtonRecordingStartedAt = Date()
+            }
+            isPreparingToRecord = false
+            print("🎙️ BuddyDictationManager: recognition session started")
+        } catch {
+            isPreparingToRecord = false
+            lastErrorMessage = userFacingErrorMessage(
+                from: error,
+                fallback: "couldn't start voice input. try again."
+            )
+            print("❌ BuddyDictationManager: failed to start recognition session (\(transcriptionProvider.displayName)): \(error)")
+            resetSessionState()
+        }
+    }
+
+    private func stopPushToTalk(expectedStartSource: BuddyDictationStartSource) {
+        pendingStartRequestIdentifier = UUID()
+
+        guard activeStartSource == expectedStartSource else {
+            isPreparingToRecord = false
+            return
+        }
+        guard !isFinalizingTranscript else { return }
+
+        print("🎙️ BuddyDictationManager: stop requested (\(expectedStartSource))")
+
+        isRecordingFromMicrophoneButton = false
+        isRecordingFromKeyboardShortcut = false
+        isFinalizingTranscript = true
+
+        let finalTranscriptFallbackDelaySeconds = activeTranscriptionSession?.finalTranscriptFallbackDelaySeconds
+            ?? Self.defaultFinalTranscriptFallbackDelaySeconds
+
