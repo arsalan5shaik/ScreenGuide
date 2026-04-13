@@ -374,3 +374,70 @@ final class BuddyDictationManager: NSObject, ObservableObject {
         }
     }
 
+    private func startPushToTalk(
+        startSource: BuddyDictationStartSource,
+        currentDraftText: String,
+        updateDraftText: @escaping (String) -> Void,
+        submitDraftText: @escaping (String) -> Void,
+        shouldAutomaticallySubmitFinalDraftOnStop: Bool
+    ) async {
+        guard !isDictationInProgress else { return }
+
+        print("🎙️ BuddyDictationManager: start requested (\(startSource))")
+
+        if needsInitialPermissionPrompt {
+            print("🎙️ BuddyDictationManager: requesting initial permissions")
+            NSApplication.shared.activate(ignoringOtherApps: true)
+
+            do {
+                try await Task.sleep(for: .milliseconds(200))
+            } catch {
+                // If the task is cancelled while the app is being activated,
+                // we can safely continue into the permission request.
+            }
+        }
+
+        let startRequestIdentifier = UUID()
+        pendingStartRequestIdentifier = startRequestIdentifier
+
+        lastErrorMessage = nil
+        currentPermissionProblem = nil
+        isPreparingToRecord = true
+
+        guard await requestMicrophoneAndSpeechPermissionsWithoutDuplicatePrompts() else {
+            print("🎙️ BuddyDictationManager: permissions missing or denied")
+            isPreparingToRecord = false
+            return
+        }
+        guard !Task.isCancelled else {
+            print("🎙️ BuddyDictationManager: start cancelled (shortcut released during permission check)")
+            isPreparingToRecord = false
+            return
+        }
+        guard pendingStartRequestIdentifier == startRequestIdentifier else {
+            print("🎙️ BuddyDictationManager: start request superseded")
+            isPreparingToRecord = false
+            return
+        }
+
+        draftTextBeforeCurrentDictation = currentDraftText
+        latestRecognizedText = ""
+        draftCallbacks = BuddyDictationDraftCallbacks(
+            updateDraftText: updateDraftText,
+            submitDraftText: submitDraftText
+        )
+        activeStartSource = startSource
+        shouldAutomaticallySubmitFinalDraft = shouldAutomaticallySubmitFinalDraftOnStop
+        hasFinishedCurrentDictationSession = false
+        isFinalizingTranscript = false
+        isRecordingFromMicrophoneButton = startSource == .microphoneButton
+        isRecordingFromKeyboardShortcut = startSource == .keyboardShortcut
+        isKeyboardShortcutSessionActiveOrFinalizing = startSource == .keyboardShortcut
+        currentAudioPowerLevel = 0
+        recordedAudioPowerHistory = Array(
+            repeating: Self.recordedAudioPowerHistoryBaselineLevel,
+            count: Self.recordedAudioPowerHistoryLength
+        )
+        microphoneButtonRecordingStartedAt = nil
+        lastRecordedAudioPowerSampleDate = .distantPast
+
