@@ -58,3 +58,59 @@ class TrayManager(QObject):
     on_set_response_language = pyqtSignal(str)  # "" = auto-detect, else ISO code
     on_set_custom_instructions = pyqtSignal(str)
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # Icons MUST be created after QApplication exists
+        self._icons = {
+            "idle":      _make_tray_icon(QColor(80, 80, 120)),
+            "listening": _make_tray_icon(QColor(50, 200, 100)),
+            "thinking":  _make_tray_icon(QColor(0, 120, 255)),
+            "speaking":  _make_tray_icon(QColor(255, 140, 0)),
+        }
+
+        self._tray = QSystemTrayIcon()
+        self._tray.setIcon(self._icons["idle"])
+        self._tray.setToolTip(
+            f"ScreenGuide - AI Companion\nHold {cfg.hotkey} to speak"
+        )
+        self._search_enabled = True
+        self._wake_enabled = True
+        self._response_language = ""
+        try:
+            from config import cfg as _cfg
+            self._custom_instructions = _cfg.custom_instructions
+        except Exception:
+            self._custom_instructions = ""
+        self._slow_enabled = False
+        self._quiz_enabled = False
+        self._privacy_enabled = True
+        self._code_enabled = True
+        self._multilang_enabled = True
+        self._journal_enabled = True
+        self._ocr_enabled = True
+        self._is_recording = False
+
+        # Ollama model state — populated by manager via set_ollama_models()
+        self._ollama_installed: dict[str, list[str]] = {"vision": [], "text": []}
+
+        self._build_menu()
+        self._tray.activated.connect(self._on_activated)
+        self._tray.show()
+
+    def _build_menu(self):
+        menu = QMenu()
+        menu.setStyleSheet(
+            "QMenu { background: rgb(22,22,28); border: 1px solid rgb(55,55,70);"
+            "border-radius: 8px; color: rgb(220,220,230); font-size: 13px; }"
+            "QMenu::item:selected { background: rgb(0,90,200); border-radius: 4px; }"
+            "QMenu::separator { height: 1px; background: rgb(55,55,70); margin: 4px 8px; }"
+        )
+
+        providers = cfg.describe()
+        info = menu.addAction(
+            f"LLM: {providers['llm']}  |  STT: {providers['stt']}  |  TTS: {providers['tts']}"
+        )
+        info.setEnabled(False)
+        menu.addSeparator()
+
