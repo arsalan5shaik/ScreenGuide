@@ -260,3 +260,58 @@ private final class OpenAIAudioTranscriptionSession: BuddyStreamingTranscription
         )
         requestBodyData.appendString("--\(boundary)--\r\n")
 
+        return requestBodyData
+    }
+
+    private func transcriptionPromptText() -> String? {
+        let normalizedKeyterms = keyterms
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !normalizedKeyterms.isEmpty else { return nil }
+
+        return """
+        This is a short push-to-talk transcript for a coding and product app. Expect product names, technical terms, and app-specific vocabulary such as: \(normalizedKeyterms.joined(separator: ", ")).
+        """
+    }
+
+    private func deliverFinalTranscript(_ transcriptText: String) {
+        guard !hasDeliveredFinalTranscript else { return }
+        hasDeliveredFinalTranscript = true
+        onFinalTranscriptReady(transcriptText)
+    }
+
+    deinit {
+        cancel()
+    }
+}
+
+private extension Data {
+    mutating func appendString(_ string: String) {
+        append(string.data(using: .utf8)!)
+    }
+
+    mutating func appendMultipartFormField(
+        named fieldName: String,
+        value: String,
+        usingBoundary boundary: String
+    ) {
+        appendString("--\(boundary)\r\n")
+        appendString("Content-Disposition: form-data; name=\"\(fieldName)\"\r\n\r\n")
+        appendString("\(value)\r\n")
+    }
+
+    mutating func appendMultipartFileField(
+        named fieldName: String,
+        filename: String,
+        mimeType: String,
+        fileData: Data,
+        usingBoundary boundary: String
+    ) {
+        appendString("--\(boundary)\r\n")
+        appendString("Content-Disposition: form-data; name=\"\(fieldName)\"; filename=\"\(filename)\"\r\n")
+        appendString("Content-Type: \(mimeType)\r\n\r\n")
+        append(fileData)
+        appendString("\r\n")
+    }
+}
