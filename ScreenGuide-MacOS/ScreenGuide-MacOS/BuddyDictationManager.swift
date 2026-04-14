@@ -491,3 +491,55 @@ final class BuddyDictationManager: NSObject, ObservableObject {
         let finalTranscriptFallbackDelaySeconds = activeTranscriptionSession?.finalTranscriptFallbackDelaySeconds
             ?? Self.defaultFinalTranscriptFallbackDelaySeconds
 
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        activeTranscriptionSession?.requestFinalTranscript()
+
+        finalizeFallbackWorkItem?.cancel()
+        let shouldSubmitFinalDraftWhenFallbackTriggers = shouldAutomaticallySubmitFinalDraft
+        let fallbackWorkItem = DispatchWorkItem { [weak self] in
+            Task { @MainActor in
+                self?.finishCurrentDictationSessionIfNeeded(
+                    shouldSubmitFinalDraft: shouldSubmitFinalDraftWhenFallbackTriggers
+                )
+            }
+        }
+        finalizeFallbackWorkItem = fallbackWorkItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + finalTranscriptFallbackDelaySeconds,
+            execute: fallbackWorkItem
+        )
+    }
+
+    private func startRecognitionSession() async throws {
+        activeTranscriptionSession?.cancel()
+        activeTranscriptionSession = nil
+
+        print("🎙️ BuddyDictationManager: opening transcription provider \(transcriptionProvider.displayName)")
+
+        let activeTranscriptionSession = try await transcriptionProvider.startStreamingSession(
+            keyterms: buildTranscriptionKeyterms(),
+            onTranscriptUpdate: { [weak self] transcriptText in
+                Task { @MainActor in
+                    self?.latestRecognizedText = transcriptText
+                }
+            },
+            onFinalTranscriptReady: { [weak self] transcriptText in
+                Task { @MainActor in
+                    guard let self else { return }
+                    self.latestRecognizedText = transcriptText
+
+                    if self.isFinalizingTranscript {
+                        self.finishCurrentDictationSessionIfNeeded(
+                            shouldSubmitFinalDraft: self.shouldAutomaticallySubmitFinalDraft
+                        )
+                    }
+                }
+            },
+            onError: { [weak self] error in
+                Task { @MainActor in
+                    self?.handleRecognitionError(error)
+                }
+            }
+        )
+
