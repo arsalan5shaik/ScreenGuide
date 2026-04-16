@@ -106,3 +106,15 @@ def capture_all_screens(max_width: int = 1280) -> List[ScreenShot]:
                 logical_top=int(round(phys_top  / dpi)),
             ))
 
+    return results
+
+
+def capture_primary() -> ScreenShot:
+    """Capture only the primary monitor."""
+    screens = capture_all_screens()
+    return screens[0] if screens else None
+
+
+def screen_count() -> int:
+    with mss.mss() as sct:
+        return len(sct.monitors) - 1  # subtract virtual combined monitor
