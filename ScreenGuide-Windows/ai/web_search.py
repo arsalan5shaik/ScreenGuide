@@ -98,3 +98,54 @@ async def _tavily(query: str, max_results: int) -> str:
 async def _free_deep_search(query: str, max_results: int) -> str:
     sub_queries = _expand_query(query)
 
+    seen: set[str] = set()
+    hits: list[Tuple[str, str]] = []   # (title, url)
+
+    async with httpx.AsyncClient(
+        timeout=FETCH_TIMEOUT,
+        headers={"User-Agent": USER_AGENT},
+        follow_redirects=True,
+    ) as client:
+        search_tasks = [_ddg_html_search(client, q) for q in sub_queries]
+        search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
+        for result in search_results:
+            if isinstance(result, Exception):
+                continue
+            for title, url in result:
+                if url in seen:
+                    continue
+                seen.add(url)
+                hits.append((title, url))
+                if len(hits) >= max_results * 2:
+                    break
+            if len(hits) >= max_results * 2:
+                break
+
+        hits = hits[:max_results]
+        if not hits:
+            return ""
+
+        fetch_tasks = [_fetch_text(client, url) for _, url in hits]
+        pages = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+
+    parts: list[str] = []
+    for i, ((title, url), page) in enumerate(zip(hits, pages), 1):
+        body = "" if isinstance(page, Exception) else page
+        body = (body or "").strip()[:PAGE_CHAR_BUDGET]
+        if not body:
+            continue
+        parts.append(f"[{i}] {title} — {url}\n{body}")
+
+    return _truncate("\n\n".join(parts), OVERALL_CHAR_BUDGET)
+
+
+# ── Query expansion ───────────────────────────────────────────────────────────
+
+_STOPWORDS = {
+    "what", "whats", "what's", "how", "why", "when", "where", "who",
+    "is", "are", "the", "a", "an", "of", "on", "in", "to", "for",
+    "do", "does", "i", "you", "me", "this", "that", "please", "tell",
+    "explain", "screenguide", "hey",
+}
+
