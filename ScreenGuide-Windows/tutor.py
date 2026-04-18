@@ -51,3 +51,56 @@ LOCATE_RE = re.compile(
     re.IGNORECASE,
 )
 
+MULTISTEP_RE = re.compile(
+    r"\b(how\s+(do\s+i|to)\s+(export|install|configure|set\s*up|setup|publish|"
+    r"deploy|enable|disable|build|launch|download|upload|record))\b",
+    re.IGNORECASE,
+)
+
+NEXT_RE = re.compile(r"^\s*(next|continue|go\s*on|keep\s*going|what'?s?\s*next)[\s.!?]*$",
+                     re.IGNORECASE)
+
+STOP_RE = re.compile(r"^\s*(stop|quit|cancel|never\s*mind|nevermind)[\s.!?]*$",
+                     re.IGNORECASE)
+
+
+def is_locate(q: str) -> bool:
+    return LOCATE_RE.search(q) is not None
+
+
+def is_multistep(q: str) -> bool:
+    return MULTISTEP_RE.search(q) is not None
+
+
+def is_next(q: str) -> bool:
+    return NEXT_RE.match(q or "") is not None
+
+
+def is_stop(q: str) -> bool:
+    return STOP_RE.match(q or "") is not None
+
+
+# ── New voice classifiers ────────────────────────────────────────────────────
+
+REPEAT_RE = re.compile(
+    r"^\s*(repeat|say\s+(it|that)\s*again|say\s+again|once\s+more|"
+    r"what\s+(did\s+you|d['’]you)\s+say)[\s.!?]*$",
+    re.IGNORECASE,
+)
+
+JOURNAL_TODAY_RE = re.compile(
+    r"\bwhat\s+(did|have)\s+i\s+(learn|learned|asked)\s+(today|so\s+far)\b",
+    re.IGNORECASE,
+)
+
+JOURNAL_WEEK_RE = re.compile(
+    r"\bwhat\s+(did|have)\s+i\s+(learn|learned)\s+(this\s+week|recently|"
+    r"in\s+the\s+past\s+week)\b",
+    re.IGNORECASE,
+)
+
+QUIZ_REVIEW_RE = re.compile(
+    r"\b(quiz\s+me|review\s+me|test\s+me)(\s+on\s+(what\s+i\s+learned|my\s+notes))?\b",
+    re.IGNORECASE,
+)
+
