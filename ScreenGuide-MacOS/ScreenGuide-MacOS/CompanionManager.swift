@@ -154,3 +154,55 @@ final class CompanionManager: ObservableObject {
         let trimmedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedEmail.isEmpty else { return }
 
+        hasSubmittedEmail = true
+        UserDefaults.standard.set(true, forKey: "hasSubmittedEmail")
+
+        // Identify user in PostHog
+        PostHogSDK.shared.identify(trimmedEmail, userProperties: [
+            "email": trimmedEmail
+        ])
+
+        // Submit to FormSpark
+        Task {
+            var request = URLRequest(url: URL(string: "https://submit-form.com/RWbGJxmIs")!)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: ["email": trimmedEmail])
+            _ = try? await URLSession.shared.data(for: request)
+        }
+    }
+
+    func start() {
+        refreshAllPermissions()
+        print("🔑 ScreenGuide start — accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), screenContent: \(hasScreenContentPermission), onboarded: \(hasCompletedOnboarding)")
+        startPermissionPolling()
+        bindVoiceStateObservation()
+        bindAudioPowerLevel()
+        bindShortcutTransitions()
+        // Eagerly touch the Claude API so its TLS warmup handshake completes
+        // well before the onboarding demo fires at ~40s into the video.
+        _ = claudeAPI
+
+        // If the user already completed onboarding AND all permissions are
+        // still granted, show the cursor overlay immediately. If permissions
+        // were revoked (e.g. signing change), don't show the cursor — the
+        // panel will show the permissions UI instead.
+        if hasCompletedOnboarding && allPermissionsGranted && isScreenGuideCursorEnabled {
+            overlayWindowManager.hasShownOverlayBefore = true
+            overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+            isOverlayVisible = true
+        }
+    }
+
+    /// Called by BlueCursorView after the buddy finishes its pointing
+    /// animation and returns to cursor-following mode.
+    /// Triggers the onboarding sequence — dismisses the panel and restarts
+    /// the overlay so the welcome animation and intro video play.
+    func triggerOnboarding() {
+        // Post notification so the panel manager can dismiss the panel
+        NotificationCenter.default.post(name: .screenguideDismissPanel, object: nil)
+
+        // Mark onboarding as completed so the Start button won't appear
+        // again on future launches — the cursor will auto-show instead
+        hasCompletedOnboarding = true
+
