@@ -266,3 +266,53 @@ async def detect_element_universal(
     if s1_pick is None:
         return None
 
+    # Convert cell number → row/col (1-indexed, row-major)
+    idx = s1_pick - 1
+    s1_row = idx // STAGE1_COLS
+    s1_col = idx % STAGE1_COLS
+    cell_w = iw / STAGE1_COLS
+    cell_h = ih / STAGE1_ROWS
+
+    # Stage-2 crop region: ZOOM_RADIUS cells in each direction
+    c0 = max(0, s1_col - ZOOM_RADIUS_CELLS)
+    r0 = max(0, s1_row - ZOOM_RADIUS_CELLS)
+    c1 = min(STAGE1_COLS - 1, s1_col + ZOOM_RADIUS_CELLS)
+    r1 = min(STAGE1_ROWS - 1, s1_row + ZOOM_RADIUS_CELLS)
+
+    crop_left   = int(c0 * cell_w)
+    crop_top    = int(r0 * cell_h)
+    crop_right  = int((c1 + 1) * cell_w)
+    crop_bottom = int((r1 + 1) * cell_h)
+
+    crop = infer_img.crop((crop_left, crop_top, crop_right, crop_bottom))
+
+    # ── Stage 2 ─────────────────────────────────────────────────────────
+    # Optionally upscale the crop a bit so the grid labels are crisp at
+    # vision-LLM resolution (helps llava in particular)
+    target_crop_w = max(crop.size[0], 768)
+    if crop.size[0] < target_crop_w:
+        scale = target_crop_w / crop.size[0]
+        crop = crop.resize(
+            (target_crop_w, int(crop.size[1] * scale)),
+            Image.Resampling.LANCZOS,
+        )
+
+    s2_img = _draw_grid(crop, STAGE2_COLS, STAGE2_ROWS)
+    s2_b64 = _img_to_jpeg_b64(s2_img, quality=85)
+
+    s2_max = STAGE2_COLS * STAGE2_ROWS
+    s2_pick = await _ask_grid_pick(llm, s2_b64, user_question, s2_max, model=model)
+    if s2_pick is None:
+        # Fall back to centre of Stage-1 cell
+        infer_x = (s1_col + 0.5) * cell_w
+        infer_y = (s1_row + 0.5) * cell_h
+    else:
+        # s2 cell centre in CROP space
+        s2_idx = s2_pick - 1
+        s2_row = s2_idx // STAGE2_COLS
+        s2_col = s2_idx % STAGE2_COLS
+        s2_cell_w = (crop_right - crop_left) / STAGE2_COLS
+        s2_cell_h = (crop_bottom - crop_top) / STAGE2_ROWS
+        infer_x = crop_left + (s2_col + 0.5) * s2_cell_w
+        infer_y = crop_top  + (s2_row + 0.5) * s2_cell_h
+
