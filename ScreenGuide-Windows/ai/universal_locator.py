@@ -316,3 +316,20 @@ async def detect_element_universal(
         infer_x = crop_left + (s2_col + 0.5) * s2_cell_w
         infer_y = crop_top  + (s2_row + 0.5) * s2_cell_h
 
+    # ── Coord transform: infer-img → physical px → logical Qt px ───────
+    # infer_img → original JPEG (× 1/scale_w), then JPEG → physical px
+    # (already accounted for in physical_width/original_width).
+    jpeg_x = infer_x / scale_w
+    jpeg_y = infer_y / scale_w
+
+    px = jpeg_x / original_width  * physical_width
+    py = jpeg_y / original_height * physical_height
+
+    vx = px + physical_left
+    vy = py + physical_top
+
+    s = dpi_scale if dpi_scale > 0 else 1.0
+    lx = int(round(vx / s))
+    ly = int(round(vy / s))
+
+    return Detected(x=lx, y=ly, screen_index=screen_index)
