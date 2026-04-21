@@ -246,3 +246,59 @@ async def fetch_copilot_token_only() -> str:
     r.raise_for_status()
     return r.json()["token"]
 
+
+async def fetch_models_live() -> list[dict]:
+    """Hit /models on api.githubcopilot.com and return the raw model list."""
+    tok = await fetch_copilot_token_only()
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(
+            COPILOT_MODELS_URL,
+            headers={
+                "Authorization": f"Bearer {tok}",
+                "Editor-Version": EDITOR_VERSION,
+                "Editor-Plugin-Version": EDITOR_PLUGIN,
+                "Copilot-Integration-Id": "vscode-chat",
+                "User-Agent": USER_AGENT,
+                "Accept": "application/json",
+            },
+        )
+    r.raise_for_status()
+    payload = r.json()
+    # API returns either {"data": [...]} (OpenAI-style) or a bare list.
+    items = payload.get("data") if isinstance(payload, dict) else payload
+    if not isinstance(items, list):
+        raise RuntimeError(f"Unexpected /models payload: {payload!r}")
+    return items
+
+
+def _normalise_model(m: dict) -> dict:
+    """Pull out the bits we care about into a flat shape."""
+    cap = m.get("capabilities", {}) or {}
+    supports = cap.get("supports", {}) or {}
+    billing = m.get("billing", {}) or {}
+    multiplier = billing.get("multiplier")
+    if multiplier is None:
+        # Some non-premium models omit the field entirely
+        multiplier = 0 if not billing.get("is_premium", False) else 1
+    return {
+        "id":          m.get("id") or m.get("name"),
+        "label":       m.get("name") or m.get("id"),
+        "vendor":      m.get("vendor", ""),
+        "type":        cap.get("type", "chat"),
+        "vision":      bool(supports.get("vision", False)),
+        "streaming":   bool(supports.get("streaming", True)),
+        "multiplier":  float(multiplier),
+        "is_premium":  bool(billing.get("is_premium", multiplier and multiplier > 0)),
+        "picker":      bool(m.get("model_picker_enabled", True)),
+    }
+
+
+async def refresh_models_to_cache() -> list[dict]:
+    """Fetch live + write to %LOCALAPPDATA%\\ScreenGuide\\copilot_models.json."""
+    raw = await fetch_models_live()
+    flat = [_normalise_model(m) for m in raw if m.get("id")]
+    flat = [m for m in flat if m["type"] == "chat" and m["picker"]]
+    blob = {"fetched_at": time.time(), "models": flat}
+    _models_cache_path().write_text(json.dumps(blob, indent=2))
+    return flat
+
