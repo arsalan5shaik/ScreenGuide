@@ -149,3 +149,56 @@ _STOPWORDS = {
     "explain", "screenguide", "hey",
 }
 
+
+def _expand_query(query: str) -> list[str]:
+    """Produce 1-2 focused queries: the original + one stripped/reformulated."""
+    from datetime import datetime
+    base = query.strip()
+    queries = [base]
+
+    tokens = re.findall(r"[A-Za-z0-9\-']+", base.lower())
+    keywords = [t for t in tokens if t not in _STOPWORDS and len(t) > 1]
+
+    # For recency-sensitive questions ("best X", "top X", "who is X now",
+    # "latest X", "current X") append the current year so DDG surfaces
+    # fresh results instead of evergreen pages.
+    RECENCY_RE = re.compile(
+        r"\b(best|top|greatest|popular|trending|latest|current|"
+        r"now|today|2024|2025|2026)\b", re.IGNORECASE
+    )
+    WHO_IS_RE = re.compile(r"\b(who\s+is|who\s+are|what\s+is\s+the\s+best|"
+                           r"what\s+are\s+the\s+top)\b", re.IGNORECASE)
+    year = str(datetime.now().year)
+
+    if RECENCY_RE.search(base) or WHO_IS_RE.search(base):
+        # Build a tight keyword query + year for the freshest hits
+        kw_year = " ".join(keywords)
+        if year not in kw_year:
+            kw_year = kw_year + " " + year
+        if kw_year.strip() != base.lower():
+            queries.append(kw_year.strip())
+    elif keywords and len(keywords) < len(tokens):
+        kw = " ".join(keywords)
+        if kw and kw != base.lower():
+            queries.append(kw)
+
+    return queries[:2]
+
+
+# ── DuckDuckGo HTML scraper ───────────────────────────────────────────────────
+
+_DDG_URL = "https://html.duckduckgo.com/html/"
+_RESULT_LINK_RE = re.compile(
+    r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+async def _ddg_html_search(client: httpx.AsyncClient, query: str) -> list[Tuple[str, str]]:
+    """Search DuckDuckGo via the maintained `ddgs` package.
+
+    The previous implementation scraped html.duckduckgo.com directly, which
+    DDG now rate-limits / serves with anti-bot 202 stubs. The `ddgs` library
+    rotates endpoints, user agents, and parses the JSON API — it's the
+    canonical open-source path and is actively maintained.
+
