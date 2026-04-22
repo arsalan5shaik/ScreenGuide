@@ -511,3 +511,63 @@ class CompanionManager(QObject):
         self._begin_capture()
         self._submit(self._auto_stop_after_pause())
 
+    def _handle_level(self, rms: float):
+        try:
+            self.sig_audio_level.emit(rms)
+        except Exception:
+            pass   # never crash the sounddevice audio thread
+
+    # ── Capture flow ──────────────────────────────────────────────────────────
+
+    def _begin_capture(self):
+        try:
+            self._listener.start_recording()
+        except Exception as e:
+            _log.exception("mic start failed")
+            self.sig_error.emit(
+                f"Couldn't open the microphone: {e}\n"
+                "Check Tray → Setup & Diagnostics → Microphone."
+            )
+            self._emit_state(AppState.IDLE)
+            return
+        self._emit_state(AppState.LISTENING)
+
+    async def _auto_stop_after_pause(self):
+        """When triggered by wake word, wait for user to finish speaking."""
+        import time
+        max_total_s = 10.0
+        start_t = time.monotonic()
+        while self._state == AppState.LISTENING:
+            await asyncio.sleep(0.15)
+            if time.monotonic() - start_t > max_total_s:
+                break
+        await self._end_capture_and_process()
+
+    async def _end_capture_and_process(self):
+        try:
+            pcm = self._listener.stop_recording()
+        except Exception as e:
+            _log.exception("mic stop failed")
+            self.sig_error.emit(f"Microphone capture failed: {e}")
+            self._emit_state(AppState.IDLE)
+            return
+        _log.info("captured %.1fs of audio", len(pcm) / 32000)
+        if len(pcm) < 3200:  # < 0.1s of audio — ignore
+            self._emit_state(AppState.IDLE)
+            return
+
+        self._emit_state(AppState.THINKING)
+        pointing_held = False  # track whether we told overlay to hold dwell
+
+        try:
+            # 1. Transcribe — bounded so a hung/downloading STT model can
+            # never freeze the UI on "Thinking..." forever
+            transcript = await asyncio.wait_for(
+                self._get_stt().transcribe(pcm), timeout=90,
+            )
+            _log.info("transcript: %r (provider=%s)",
+                      transcript[:120], cfg.llm_provider())
+            if not transcript.strip():
+                self._emit_state(AppState.IDLE)
+                return
+
