@@ -174,3 +174,60 @@ class Config:
             return "gemini"
         return "ollama"
 
+    def available_llm_providers(self) -> list[str]:
+        """All providers the user can switch to right now."""
+        out = []
+        if self.anthropic_api_key:
+            out.append("claude")
+        if self.openai_api_key:
+            out.append("openai")
+        try:
+            from ai.github_copilot_provider import is_authenticated as _gh_ok
+            if _gh_ok():
+                out.append("copilot")
+        except Exception:
+            pass
+        if self.google_api_key:
+            out.append("gemini")
+        out.append("ollama")     # always available if the daemon is running
+        out.append("lmstudio")   # always available if the local server is running
+        return out
+
+    def set_active_llm(self, name: str) -> None:
+        """Runtime switch — next query uses this provider. Persisted to .env."""
+        name = name.lower()
+        os.environ["SCREENGUIDE_ACTIVE_LLM"] = name
+        # Write to .env so the choice survives restarts
+        env_path = _HERE / ".env"
+        try:
+            lines = env_path.read_text(encoding="utf-8").splitlines(keepends=True) if env_path.exists() else []
+            key = "SCREENGUIDE_ACTIVE_LLM"
+            found = False
+            for i, line in enumerate(lines):
+                if line.startswith(key + "=") or line.startswith(key + " ="):
+                    lines[i] = f"{key}={name}\n"
+                    found = True
+                    break
+            if not found:
+                lines.append(f"\n{key}={name}\n")
+            env_path.write_text("".join(lines), encoding="utf-8")
+        except Exception:
+            pass  # non-fatal — runtime switch still works via os.environ
+
+    def stt_provider(self) -> str:
+        # Allow explicit override via env (so users can force whisper_cpp etc.)
+        forced = os.getenv("SCREENGUIDE_STT", "").strip().lower()
+        if forced in ("deepgram", "openai", "whisper_cpp", "faster_whisper"):
+            return forced
+        if self.deepgram_api_key:
+            return "deepgram"
+        if self.openai_api_key:
+            return "openai"
+        # Prefer whisper.cpp (GPU-accelerated, same engine as Handy) when the
+        # pywhispercpp package is installed; otherwise fall back to faster-whisper.
+        try:
+            import pywhispercpp  # noqa: F401
+            return "whisper_cpp"
+        except ImportError:
+            return "faster_whisper"
+
