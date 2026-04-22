@@ -457,3 +457,57 @@ class CompanionManager(QObject):
                 self._llm = OllamaProvider()
         return self._llm
 
+    def _get_stt(self):
+        if self._stt is None:
+            provider = cfg.stt_provider()
+            if provider == "deepgram":
+                from audio.stt.deepgram_stt import DeepgramSTT
+                self._stt = DeepgramSTT()
+            elif provider == "openai":
+                from audio.stt.openai_stt import OpenAISTT
+                self._stt = OpenAISTT()
+            elif provider == "whisper_cpp":
+                try:
+                    from audio.stt.whisper_cpp_stt import WhisperCppSTT
+                    self._stt = WhisperCppSTT()
+                except ImportError:
+                    # pywhispercpp missing → fall back silently
+                    from audio.stt.faster_whisper_stt import FasterWhisperSTT
+                    self._stt = FasterWhisperSTT()
+            else:
+                from audio.stt.faster_whisper_stt import FasterWhisperSTT
+                self._stt = FasterWhisperSTT()
+        return self._stt
+
+    def _get_tts(self):
+        if self._tts is None:
+            provider = cfg.tts_provider()
+            if provider == "elevenlabs":
+                from audio.tts.elevenlabs_provider import ElevenLabsProvider
+                self._tts = ElevenLabsProvider()
+            elif provider == "openai":
+                from audio.tts.openai_tts_provider import OpenAITTSProvider
+                self._tts = OpenAITTSProvider()
+            else:
+                from audio.tts.edge_tts_provider import EdgeTTSProvider
+                self._tts = EdgeTTSProvider()
+        return self._tts
+
+    # ── Input sources ─────────────────────────────────────────────────────────
+
+    def on_hotkey_press(self):
+        if self._state != AppState.IDLE:
+            return
+        self._begin_capture()
+
+    def on_hotkey_release(self):
+        if self._state == AppState.LISTENING:
+            self._submit(self._end_capture_and_process())
+
+    def _handle_wake(self):
+        """Triggered from ambient listener when wake-word is detected."""
+        if self._state != AppState.IDLE:
+            return
+        self._begin_capture()
+        self._submit(self._auto_stop_after_pause())
+
