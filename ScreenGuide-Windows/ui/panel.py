@@ -386,3 +386,15 @@ class CompanionPanel(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
 
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.MouseButton.LeftButton and hasattr(self, '_drag_pos'):
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+
+    # ── Painting: rounded glass background ───────────────────────────────────
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QBrush(QColor(18, 18, 22, 235)))
+        painter.setPen(QPen(QColor(60, 60, 75, 180), 1))
+        painter.drawRoundedRect(self.rect(), PANEL_RADIUS, PANEL_RADIUS)
+        painter.end()
