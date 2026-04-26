@@ -223,3 +223,40 @@ class WindowPositionManager {
             return
         }
 
+        // The other window's frame in screen coordinates (top-left origin from AX API).
+        // Convert to check if it's on the same screen as our window.
+        let otherRight = otherPosition.x + otherSize.width
+        let ourLeft = mainWindow.frame.origin.x
+
+        // Check that the other window is on the same screen by verifying its origin
+        // falls within the target screen's bounds.
+        let screenFrame = mainScreen.frame
+        let otherCenterX = otherPosition.x + otherSize.width / 2
+        // AX uses top-left origin, NSScreen uses bottom-left. Convert AX Y to NSScreen Y.
+        let otherNSScreenY = screenFrame.maxY - otherPosition.y - otherSize.height
+        let otherCenterY = otherNSScreenY + otherSize.height / 2
+        let otherCenter = NSPoint(x: otherCenterX, y: otherCenterY)
+
+        guard screenFrame.contains(otherCenter) else { return }
+
+        // If the other window's right edge extends past our window's left edge, shrink it.
+        if otherRight > ourLeft {
+            let newWidth = ourLeft - otherPosition.x
+            guard newWidth > 200 else { return } // Don't shrink too small
+
+            var newSize = CGSize(width: newWidth, height: otherSize.height)
+            guard let newSizeValue = AXValueCreate(.cgSize, &newSize) else { return }
+            AXUIElementSetAttributeValue(focusedWindow as! AXUIElement, kAXSizeAttribute as CFString, newSizeValue)
+        }
+    }
+}
+
+// MARK: - NSScreen Extension
+
+extension NSScreen {
+    /// The CGDirectDisplayID for this screen.
+    var displayID: CGDirectDisplayID {
+        let key = NSDeviceDescriptionKey("NSScreenNumber")
+        return deviceDescription[key] as? CGDirectDisplayID ?? 0
+    }
+}
