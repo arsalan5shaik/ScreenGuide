@@ -154,3 +154,64 @@ class SetupWizard(QDialog):
         self.progress.hide()
         self.progress.setValue(0)
 
+        if step == "intro":
+            running = ob.is_ollama_running()
+            if running:
+                self.title.setText("Ollama detected ✓")
+                self.subtitle.setText(
+                    "Ollama is already running on your machine. We'll just check that "
+                    "the AI models you need are downloaded."
+                )
+                self.action_btn.setText("Check models")
+            else:
+                self.title.setText("Step 1 of 3 — Install Ollama")
+                self.subtitle.setText(
+                    "Ollama is the engine that runs the AI on your computer. "
+                    "We'll download and install it for you (≈700 MB)."
+                )
+                self.action_btn.setText("Install Ollama")
+            self.status.setText("")
+
+        elif step == "installing":
+            self.title.setText("Installing Ollama…")
+            self.subtitle.setText(
+                "Downloading the official installer from ollama.com, then launching it. "
+                "Click through any UAC / installer prompts that appear."
+            )
+            self.action_btn.setEnabled(False)
+            self.skip_btn.setEnabled(False)
+            self.status.setText("Starting download…")
+            self.progress.show()
+
+        elif step == "text_model":
+            name = cfg.ollama_text_model
+            self.title.setText("Step 2 of 3 — Download text model")
+            self.subtitle.setText(
+                f"Pulling {name} (≈2 GB). This is what answers when you ask ScreenGuide a question."
+            )
+            self.action_btn.setText(f"Pull {name}")
+            self.action_btn.setEnabled(True)
+            self.skip_btn.setEnabled(True)
+            self.skip_btn.setText("Skip this model")
+            self.status.setText("")
+
+        elif step == "pulling_text":
+            self.title.setText(f"Pulling {cfg.ollama_text_model}…")
+            self.action_btn.setEnabled(False)
+            self.skip_btn.setEnabled(False)
+            self.status.setText("Connecting to Ollama…")
+            self.progress.show()
+
+        elif step == "vision_model":
+            name = cfg.ollama_vision_model
+            self.title.setText("Step 3 of 3 — Download vision model (optional)")
+            self.subtitle.setText(
+                f"Pulling {name} (≈3 GB). Needed only when ScreenGuide reads your screen "
+                f"(Pixel-Perfect Pointing, screenshots). You can skip this and add it later."
+            )
+            self.action_btn.setText(f"Pull {name}")
+            self.action_btn.setEnabled(True)
+            self.skip_btn.setEnabled(True)
+            self.skip_btn.setText("Skip — add later")
+            self.status.setText("")
+
