@@ -99,3 +99,56 @@ enum DS {
         /// #1d4ed8 → ~6.5:1 contrast with white text (WCAG AA+).
         static let accentHover = blue700
 
+        /// Accent text — bright blue used for accent-colored text and icons
+        /// on dark backgrounds (links, active nav items, highlighted labels).
+        static let accentText = blue400
+
+        /// Very subtle accent tint — used for selected item backgrounds (e.g. current step
+        /// in the sidebar). Low opacity so it doesn't overpower.
+        static let accentSubtle = blue500.opacity(0.10)
+
+        // ── Semantic Colors ──────────────────────────────────────────
+
+        /// Destructive/error actions — delete buttons, error messages, close button hover.
+        static let destructive = Color(hex: "#E5484D")        // Radix Red 9
+
+        /// Destructive hover state.
+        static let destructiveHover = Color(hex: "#F2555A")   // Radix Red 10
+
+        /// Destructive used for text on dark backgrounds (brighter for readability).
+        static let destructiveText = Color(hex: "#FF6369")    // Radix Red 11
+
+        /// Success — checkmarks, granted status, completion indicators.
+        /// Independent green so success states are visually distinct from the blue accent.
+        static let success = Color(hex: "#34D399")      // Tailwind Emerald 400
+
+        /// Warning — caution messages, manual verification failure explanations.
+        static let warning = Color(hex: "#FFB224")            // Radix Amber 9
+
+        /// Warning text — brighter variant for text on dark backgrounds.
+        static let warningText = Color(hex: "#F1A10D")        // Radix Amber 11
+
+        /// Info/feature highlight — used for prompt card headers, code highlights.
+        /// Lighter than accentText so informational elements are visually distinct
+        /// from interactive accent-colored elements.
+        static let info = Color(hex: "#70B8FF")               // Radix Blue 9
+
+        /// Inline code text color — slightly brighter blue for monospace code snippets.
+        static let codeText = Color(hex: "#9DC2FF")           // Radix Blue 11 variant
+
+        // ── Overlay Cursor ───────────────────────────────────────────
+
+        /// The blue cursor/bubble color used in OverlayWindow.
+        /// Kept distinct from the accent since it serves a different purpose
+        /// (screen overlay vs in-app UI).
+        static let overlayCursorBlue = Color(hex: "#3380FF")
+
+        // ── Floating Button Gradient ─────────────────────────────────
+
+        /// The floating session button gradient colors (unchanged from original —
+        /// this gradient is intentionally distinct from the rest of the palette
+        /// to make the floating button stand out as a "jewel" on the desktop).
+        static let floatingGradientPurple = Color(hex: "#8F46EB")
+        static let floatingGradientPink = Color(hex: "#E84D9E")
+        static let floatingGradientOrange = Color(hex: "#FF8C33")
+
