@@ -103,3 +103,55 @@ private final class AssemblyAIStreamingTranscriptionSession: NSObject, BuddyStre
         let message: String?
     }
 
+    private struct StoredTurnTranscript {
+        var transcriptText: String
+        var isFormatted: Bool
+    }
+
+    private static let websocketBaseURLString = "wss://streaming.assemblyai.com/v3/ws"
+    private static let targetSampleRate = 16_000.0
+    private static let explicitFinalTranscriptGracePeriodSeconds = 1.4
+
+    let finalTranscriptFallbackDelaySeconds: TimeInterval = 2.8
+
+    private let apiKey: String?
+    private let temporaryToken: String?
+    private let keyterms: [String]
+    private let onTranscriptUpdate: (String) -> Void
+    private let onFinalTranscriptReady: (String) -> Void
+    private let onError: (Error) -> Void
+
+    private let stateQueue = DispatchQueue(label: "com.learningbuddy.assemblyai.state")
+    private let sendQueue = DispatchQueue(label: "com.learningbuddy.assemblyai.send")
+    private let audioPCM16Converter = BuddyPCM16AudioConverter(targetSampleRate: targetSampleRate)
+    private let urlSession: URLSession
+
+    private var webSocketTask: URLSessionWebSocketTask?
+    private var readyContinuation: CheckedContinuation<Void, Error>?
+    private var hasResolvedReadyContinuation = false
+    private var hasDeliveredFinalTranscript = false
+    private var isAwaitingExplicitFinalTranscript = false
+    private var latestTranscriptText = ""
+    private var activeTurnOrder: Int?
+    private var activeTurnTranscriptText = ""
+    private var storedTurnTranscriptsByOrder: [Int: StoredTurnTranscript] = [:]
+    private var explicitFinalTranscriptDeadlineWorkItem: DispatchWorkItem?
+
+    init(
+        apiKey: String?,
+        temporaryToken: String?,
+        urlSession: URLSession,
+        keyterms: [String],
+        onTranscriptUpdate: @escaping (String) -> Void,
+        onFinalTranscriptReady: @escaping (String) -> Void,
+        onError: @escaping (Error) -> Void
+    ) {
+        self.apiKey = apiKey
+        self.temporaryToken = temporaryToken
+        self.urlSession = urlSession
+        self.keyterms = keyterms
+        self.onTranscriptUpdate = onTranscriptUpdate
+        self.onFinalTranscriptReady = onFinalTranscriptReady
+        self.onError = onError
+    }
+
