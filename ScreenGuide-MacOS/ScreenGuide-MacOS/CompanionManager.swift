@@ -206,3 +206,56 @@ final class CompanionManager: ObservableObject {
         // again on future launches — the cursor will auto-show instead
         hasCompletedOnboarding = true
 
+        ScreenGuideAnalytics.trackOnboardingStarted()
+
+        // Play Besaid theme at 60% volume, fade out after 1m 30s
+        startOnboardingMusic()
+
+        // Show the overlay for the first time — isFirstAppearance triggers
+        // the welcome animation and onboarding video
+        overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+        isOverlayVisible = true
+    }
+
+    /// Replays the onboarding experience from the "Watch Onboarding Again"
+    /// footer link. Same flow as triggerOnboarding but the cursor overlay
+    /// is already visible so we just restart the welcome animation and video.
+    func replayOnboarding() {
+        NotificationCenter.default.post(name: .screenguideDismissPanel, object: nil)
+        ScreenGuideAnalytics.trackOnboardingReplayed()
+        startOnboardingMusic()
+        // Tear down any existing overlays and recreate with isFirstAppearance = true
+        overlayWindowManager.hasShownOverlayBefore = false
+        overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+        isOverlayVisible = true
+    }
+
+    private func stopOnboardingMusic() {
+        onboardingMusicFadeTimer?.invalidate()
+        onboardingMusicFadeTimer = nil
+        onboardingMusicPlayer?.stop()
+        onboardingMusicPlayer = nil
+    }
+
+    private func startOnboardingMusic() {
+        stopOnboardingMusic()
+        guard let musicURL = Bundle.main.url(forResource: "ff", withExtension: "mp3") else {
+            print("⚠️ ScreenGuide: ff.mp3 not found in bundle")
+            return
+        }
+
+        do {
+            let player = try AVAudioPlayer(contentsOf: musicURL)
+            player.volume = 0.3
+            player.play()
+            self.onboardingMusicPlayer = player
+
+            // After 1m 30s, fade the music out over 3s
+            onboardingMusicFadeTimer = Timer.scheduledTimer(withTimeInterval: 90.0, repeats: false) { [weak self] _ in
+                self?.fadeOutOnboardingMusic()
+            }
+        } catch {
+            print("⚠️ ScreenGuide: Failed to play onboarding music: \(error)")
+        }
+    }
+
