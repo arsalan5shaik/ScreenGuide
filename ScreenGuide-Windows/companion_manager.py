@@ -571,3 +571,53 @@ class CompanionManager(QObject):
                 self._emit_state(AppState.IDLE)
                 return
 
+            # ── Voice commands — short-circuit before LLM ──
+            if is_stop(transcript):
+                self.stop()
+                return
+
+            title = active_window_title()
+            ak = app_key(title)
+
+            if is_next(transcript) and self._lesson_steps:
+                await self._advance_lesson_step(ak)
+                return
+
+            # "say it again" — replay the last response without a new LLM call
+            if is_repeat(transcript) and self._last_response:
+                self.sig_response_chunk.emit(self._last_response)
+                self.sig_response_done.emit(self._last_response)
+                self._emit_state(AppState.SPEAKING)
+                try:
+                    await self._get_tts().speak(self._last_response)
+                except Exception:
+                    pass
+                self._emit_state(AppState.IDLE)
+                return
+
+            # Journal voice queries — answered locally, no LLM call needed
+            if is_journal_today(transcript):
+                msg = journal.summarise(journal.entries_today(),
+                                        "Here's what you asked about today:\n")
+                await self._reply_local(msg)
+                return
+            if is_journal_week(transcript):
+                msg = journal.summarise(journal.entries_this_week(),
+                                        "Here's the past week:\n")
+                await self._reply_local(msg)
+                return
+            if is_quiz_review(transcript):
+                await self._spaced_review()
+                return
+
+            # User-created skills (run BEFORE the LLM, like built-ins above)
+            try:
+                skill = skills_pkg.match(transcript)
+                if skill:
+                    msg = await skill["handler"](self, transcript)
+                    if msg:
+                        await self._reply_local(msg)
+                    return
+            except Exception as e:
+                self.sig_error.emit(f"Skill error: {e}")
+
