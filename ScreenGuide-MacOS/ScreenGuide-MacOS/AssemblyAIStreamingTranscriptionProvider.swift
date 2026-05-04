@@ -155,3 +155,53 @@ private final class AssemblyAIStreamingTranscriptionSession: NSObject, BuddyStre
         self.onError = onError
     }
 
+    func open() async throws {
+        let websocketURL = try Self.makeWebsocketURL(
+            temporaryToken: temporaryToken,
+            keyterms: keyterms
+        )
+
+        var websocketRequest = URLRequest(url: websocketURL)
+        if let apiKey {
+            websocketRequest.setValue(apiKey, forHTTPHeaderField: "Authorization")
+        }
+
+        let webSocketTask = urlSession.webSocketTask(with: websocketRequest)
+        self.webSocketTask = webSocketTask
+        webSocketTask.resume()
+
+        receiveNextMessage()
+
+        try await withCheckedThrowingContinuation { continuation in
+            stateQueue.async {
+                self.readyContinuation = continuation
+            }
+        }
+    }
+
+    func appendAudioBuffer(_ audioBuffer: AVAudioPCMBuffer) {
+        guard let audioPCM16Data = audioPCM16Converter.convertToPCM16Data(from: audioBuffer),
+              !audioPCM16Data.isEmpty else {
+            return
+        }
+
+        sendQueue.async { [weak self] in
+            guard let self, let webSocketTask = self.webSocketTask else { return }
+            webSocketTask.send(.data(audioPCM16Data)) { [weak self] error in
+                if let error {
+                    self?.failSession(with: error)
+                }
+            }
+        }
+    }
+
+    func requestFinalTranscript() {
+        stateQueue.async {
+            guard !self.hasDeliveredFinalTranscript else { return }
+            self.isAwaitingExplicitFinalTranscript = true
+            self.scheduleExplicitFinalTranscriptDeadline()
+        }
+
+        sendJSONMessage(["type": "ForceEndpoint"])
+    }
+
