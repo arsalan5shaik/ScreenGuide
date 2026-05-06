@@ -202,3 +202,57 @@ async def _ddg_html_search(client: httpx.AsyncClient, query: str) -> list[Tuple[
     rotates endpoints, user agents, and parses the JSON API — it's the
     canonical open-source path and is actively maintained.
 
+    We run it in a thread because ddgs is sync; the rest of the search
+    pipeline is async.
+    """
+    try:
+        from ddgs import DDGS
+    except ImportError:
+        # Fall back to the old regex path if ddgs isn't installed
+        r = await client.post(_DDG_URL, data={"q": query, "kl": "us-en"})
+        if r.status_code != 200:
+            return []
+        out: list[Tuple[str, str]] = []
+        for match in _RESULT_LINK_RE.finditer(r.text):
+            url = _normalize_ddg_url(match.group(1))
+            title = _strip_html(match.group(2)).strip()
+            if url and title:
+                out.append((title, url))
+                if len(out) >= 4:
+                    break
+        return out
+
+    def _sync_search() -> list[Tuple[str, str]]:
+        try:
+            results = list(DDGS().text(query, max_results=6, region="us-en"))
+        except Exception:
+            return []
+        out: list[Tuple[str, str]] = []
+        for hit in results:
+            title = (hit.get("title") or "").strip()
+            url = (hit.get("href") or hit.get("url") or "").strip()
+            if title and url:
+                out.append((title, url))
+            if len(out) >= 4:
+                break
+        return out
+
+    return await asyncio.to_thread(_sync_search)
+
+
+def _normalize_ddg_url(href: str) -> str:
+    """DDG wraps real URLs in /l/?uddg=<encoded>. Unwrap them."""
+    if href.startswith("//"):
+        href = "https:" + href
+    if "duckduckgo.com/l/" in href or href.startswith("/l/"):
+        try:
+            qs = parse_qs(urlparse(href).query)
+            target = qs.get("uddg", [""])[0]
+            if target:
+                return unquote(target)
+        except Exception:
+            return ""
+    if href.startswith("http"):
+        return href
+    return ""
+
