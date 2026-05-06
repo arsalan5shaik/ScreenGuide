@@ -114,3 +114,54 @@ class TrayManager(QObject):
         info.setEnabled(False)
         menu.addSeparator()
 
+        show_action = menu.addAction("Show Panel")
+        show_action.triggered.connect(self.on_show_panel)
+
+        hide_action = menu.addAction("Hide Panel")
+        hide_action.triggered.connect(self.on_hide_panel)
+
+        stop_action = menu.addAction("Stop (Esc)")
+        stop_action.triggered.connect(self.on_stop)
+
+        menu.addSeparator()
+
+        # Model switcher submenu
+        switch_menu = menu.addMenu(f"Model: {providers['llm']}")
+        active = providers['llm']
+        for name in cfg.available_llm_providers():
+            label = f"● {name}" if name == active else f"  {name}"
+            act = switch_menu.addAction(label)
+            act.triggered.connect(lambda _=False, n=name: self.on_switch_provider.emit(n))
+        switch_menu.addSeparator()
+        login_act = switch_menu.addAction("Sign in to GitHub Copilot…")
+        login_act.triggered.connect(self.on_copilot_login)
+        refresh_act = switch_menu.addAction("Refresh Copilot models")
+        refresh_act.triggered.connect(self.on_copilot_refresh)
+
+        # ── Ollama-specific submenu (always visible — Ollama is the offline fallback) ──
+        self._build_ollama_submenu(menu, providers)
+
+        menu.addSeparator()
+
+        search_action = menu.addAction(
+            "Web Search: ON" if self._search_enabled else "Web Search: OFF"
+        )
+        search_action.setCheckable(True)
+        search_action.setChecked(self._search_enabled)
+        search_action.triggered.connect(self._toggle_search)
+        self._search_action = search_action
+
+        wake_action = menu.addAction(
+            "Wake word 'ScreenGuide': ON" if self._wake_enabled else "Wake word 'ScreenGuide': OFF"
+        )
+        wake_action.setCheckable(True)
+        wake_action.setChecked(self._wake_enabled)
+        wake_action.triggered.connect(self._toggle_wake)
+        self._wake_action = wake_action
+
+        self._build_language_submenu(menu)
+
+        scope_label = "Instructions for ScreenGuide…"
+        scope_action = menu.addAction(scope_label)
+        scope_action.triggered.connect(self._prompt_custom_instructions)
+
