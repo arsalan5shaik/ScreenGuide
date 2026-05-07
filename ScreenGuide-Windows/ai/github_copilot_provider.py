@@ -302,3 +302,59 @@ async def refresh_models_to_cache() -> list[dict]:
     _models_cache_path().write_text(json.dumps(blob, indent=2))
     return flat
 
+
+def cached_models() -> list[dict]:
+    """Read the cached model list, or return the built-in fallback if missing."""
+    p = _models_cache_path()
+    if p.exists():
+        try:
+            blob = json.loads(p.read_text())
+            return blob.get("models", [])
+        except Exception:
+            pass
+    # Conservative fallback — gpt-4o-mini is free across all Copilot tiers
+    # historically. The real list will replace this on first successful call.
+    return [
+        {"id": "gpt-4o-mini",       "label": "GPT-4o mini",       "vendor": "OpenAI",
+         "type": "chat", "vision": True,  "streaming": True, "multiplier": 0.0, "is_premium": False, "picker": True},
+        {"id": "gpt-4o",            "label": "GPT-4o",            "vendor": "OpenAI",
+         "type": "chat", "vision": True,  "streaming": True, "multiplier": 1.0, "is_premium": True,  "picker": True},
+        {"id": "claude-3.5-sonnet", "label": "Claude 3.5 Sonnet", "vendor": "Anthropic",
+         "type": "chat", "vision": True,  "streaming": True, "multiplier": 1.0, "is_premium": True,  "picker": True},
+    ]
+
+
+def cache_is_stale() -> bool:
+    """True if the cache is missing or older than MODEL_CACHE_TTL_SECONDS."""
+    p = _models_cache_path()
+    if not p.exists():
+        return True
+    try:
+        blob = json.loads(p.read_text())
+        return (time.time() - float(blob.get("fetched_at", 0))) > MODEL_CACHE_TTL_SECONDS
+    except Exception:
+        return True
+
+
+def free_model_ids() -> list[str]:
+    """Multiplier-0 models from the cache (or fallback). Vision-capable first."""
+    models = cached_models()
+    free = [m for m in models if m["multiplier"] == 0]
+    free.sort(key=lambda m: (not m["vision"], m["id"]))   # vision first, then alpha
+    return [m["id"] for m in free]
+
+
+def pick_default_free_model() -> str:
+    """Best free model for ScreenGuide — vision-capable, multiplier 0."""
+    models = cached_models()
+    # Vision-capable AND free → ideal (ScreenGuide sends screenshots)
+    for m in models:
+        if m["vision"] and m["multiplier"] == 0:
+            return m["id"]
+    # Free-but-no-vision → still usable (ignores the screenshot)
+    for m in models:
+        if m["multiplier"] == 0:
+            return m["id"]
+    # Should never happen, but don't crash
+    return FALLBACK_MODEL
+
