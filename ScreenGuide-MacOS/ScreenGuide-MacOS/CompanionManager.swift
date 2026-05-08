@@ -259,3 +259,55 @@ final class CompanionManager: ObservableObject {
         }
     }
 
+    private func fadeOutOnboardingMusic() {
+        guard let player = onboardingMusicPlayer else { return }
+
+        let fadeSteps = 30
+        let fadeDuration: Double = 3.0
+        let stepInterval = fadeDuration / Double(fadeSteps)
+        let volumeDecrement = player.volume / Float(fadeSteps)
+        var stepsRemaining = fadeSteps
+
+        onboardingMusicFadeTimer = Timer.scheduledTimer(withTimeInterval: stepInterval, repeats: true) { [weak self] timer in
+            stepsRemaining -= 1
+            player.volume -= volumeDecrement
+
+            if stepsRemaining <= 0 {
+                timer.invalidate()
+                player.stop()
+                self?.onboardingMusicPlayer = nil
+                self?.onboardingMusicFadeTimer = nil
+            }
+        }
+    }
+
+    func clearDetectedElementLocation() {
+        detectedElementScreenLocation = nil
+        detectedElementDisplayFrame = nil
+        detectedElementBubbleText = nil
+    }
+
+    func stop() {
+        globalPushToTalkShortcutMonitor.stop()
+        buddyDictationManager.cancelCurrentDictation()
+        overlayWindowManager.hideOverlay()
+        transientHideTask?.cancel()
+
+        currentResponseTask?.cancel()
+        currentResponseTask = nil
+        shortcutTransitionCancellable?.cancel()
+        voiceStateCancellable?.cancel()
+        audioPowerCancellable?.cancel()
+        accessibilityCheckTimer?.invalidate()
+        accessibilityCheckTimer = nil
+    }
+
+    func refreshAllPermissions() {
+        let previouslyHadAccessibility = hasAccessibilityPermission
+        let previouslyHadScreenRecording = hasScreenRecordingPermission
+        let previouslyHadMicrophone = hasMicrophonePermission
+        let previouslyHadAll = allPermissionsGranted
+
+        let currentlyHasAccessibility = WindowPositionManager.hasAccessibilityPermission()
+        hasAccessibilityPermission = currentlyHasAccessibility
+
