@@ -163,3 +163,60 @@ class ClaudeAPI {
             )
         }
 
+        // If non-2xx status, read the full body as error text
+        guard (200...299).contains(httpResponse.statusCode) else {
+            var errorBodyChunks: [String] = []
+            for try await line in byteStream.lines {
+                errorBodyChunks.append(line)
+            }
+            let errorBody = errorBodyChunks.joined(separator: "\n")
+            throw NSError(
+                domain: "ClaudeAPI",
+                code: httpResponse.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "API Error (\(httpResponse.statusCode)): \(errorBody)"]
+            )
+        }
+
+        // Parse SSE stream — each event is "data: {json}\n\n"
+        var accumulatedResponseText = ""
+
+        for try await line in byteStream.lines {
+            // SSE lines look like: "data: {...}"
+            guard line.hasPrefix("data: ") else { continue }
+            let jsonString = String(line.dropFirst(6)) // Drop "data: " prefix
+
+            // End of stream marker
+            guard jsonString != "[DONE]" else { break }
+
+            guard let jsonData = jsonString.data(using: .utf8),
+                  let eventPayload = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                  let eventType = eventPayload["type"] as? String else {
+                continue
+            }
+
+            // We care about content_block_delta events that contain text chunks
+            if eventType == "content_block_delta",
+               let delta = eventPayload["delta"] as? [String: Any],
+               let deltaType = delta["type"] as? String,
+               deltaType == "text_delta",
+               let textChunk = delta["text"] as? String {
+                accumulatedResponseText += textChunk
+                // Send the accumulated text so far to the UI for progressive rendering
+                let currentAccumulatedText = accumulatedResponseText
+                await onTextChunk(currentAccumulatedText)
+            }
+        }
+
+        let duration = Date().timeIntervalSince(startTime)
+        return (text: accumulatedResponseText, duration: duration)
+    }
+
+    /// Non-streaming fallback for validation requests where we don't need progressive display.
+    func analyzeImage(
+        images: [(data: Data, label: String)],
+        systemPrompt: String,
+        conversationHistory: [(userPlaceholder: String, assistantResponse: String)] = [],
+        userPrompt: String
+    ) async throws -> (text: String, duration: TimeInterval) {
+        let startTime = Date()
+
