@@ -220,3 +220,57 @@ class ClaudeAPI {
     ) async throws -> (text: String, duration: TimeInterval) {
         let startTime = Date()
 
+        var request = makeAPIRequest()
+
+        var messages: [[String: Any]] = []
+        for (userPlaceholder, assistantResponse) in conversationHistory {
+            messages.append(["role": "user", "content": userPlaceholder])
+            messages.append(["role": "assistant", "content": assistantResponse])
+        }
+
+        // Build current message with all labeled images + prompt
+        var contentBlocks: [[String: Any]] = []
+        for image in images {
+            contentBlocks.append([
+                "type": "image",
+                "source": [
+                    "type": "base64",
+                    "media_type": detectImageMediaType(for: image.data),
+                    "data": image.data.base64EncodedString()
+                ]
+            ])
+            contentBlocks.append([
+                "type": "text",
+                "text": image.label
+            ])
+        }
+        contentBlocks.append([
+            "type": "text",
+            "text": userPrompt
+        ])
+        messages.append(["role": "user", "content": contentBlocks])
+
+        let body: [String: Any] = [
+            "model": model,
+            "max_tokens": 256,
+            "system": systemPrompt,
+            "messages": messages
+        ]
+
+        let bodyData = try JSONSerialization.data(withJSONObject: body)
+        request.httpBody = bodyData
+        let payloadMB = Double(bodyData.count) / 1_048_576.0
+        print("🌐 Claude request: \(String(format: "%.1f", payloadMB))MB, \(images.count) image(s)")
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            let responseString = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw NSError(
+                domain: "ClaudeAPI",
+                code: (response as? HTTPURLResponse)?.statusCode ?? -1,
+                userInfo: [NSLocalizedDescriptionKey: "API Error: \(responseString)"]
+            )
+        }
+
