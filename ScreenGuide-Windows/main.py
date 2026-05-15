@@ -344,3 +344,53 @@ def main():
             tray.show_notification("Diagnostics failed", str(e))
     tray.on_diagnostics.connect(_save_diagnostics)
 
+    tray.on_quit.connect(lambda: (tray.hide_icon(), manager.shutdown(), app.quit()))
+
+    # ── Global hotkey ─────────────────────────────────────────────────────────
+    hotkey = GlobalHotkeyMonitor(
+        on_press=manager.on_hotkey_press,
+        on_release=manager.on_hotkey_release,
+    )
+    hotkey.start()
+
+    # Esc = cancel current generation (kills Ollama ramble mid-stream)
+    stop_key = StopHotkey(on_stop=manager.stop, key="esc")
+    stop_key.start()
+
+    # ── Show UI + start listener ──────────────────────────────────────────────
+    overlay.show()        # persistent overlay (cursor follow)
+    # Panel is hidden by default — user can open it from the tray menu if needed
+    manager.start()        # begin ambient mic + wake-word scanning
+
+    providers = cfg.describe()
+    tray.show_notification(
+        "ScreenGuide is running",
+        f"Say 'ScreenGuide' or hold {cfg.hotkey}  |  LLM: {providers['llm']}",
+    )
+
+    # ── First-run setup wizard ────────────────────────────────────────────────
+    # Show the Ollama install / model pull walkthrough on the first launch.
+    # If everything is already wired up, the helper is a no-op.
+    try:
+        from ui.setup_wizard import maybe_show_setup_wizard, SetupWizard
+
+        # Force-show via env var (handy for testing).
+        if os.environ.get("SCREENGUIDE_FORCE_SETUP", "").strip() in ("1", "true", "yes"):
+            wiz = SetupWizard()
+            wiz.show()
+            _setup_keepalive[0] = wiz
+        else:
+            wiz = maybe_show_setup_wizard()
+            if wiz is not None:
+                _setup_keepalive[0] = wiz   # keep a reference so it isn't GC'd
+    except Exception as e:
+        print(f"[setup-wizard] skipped: {e}")
+
+    sys.exit(app.exec())
+
+
+# Module-level slot used to keep a reference to the setup wizard alive while
+# Qt is running (PyQt will GC it otherwise and the dialog will vanish).
+_setup_keepalive: list = [None]
+
+
