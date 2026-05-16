@@ -311,3 +311,73 @@ final class CompanionManager: ObservableObject {
         let currentlyHasAccessibility = WindowPositionManager.hasAccessibilityPermission()
         hasAccessibilityPermission = currentlyHasAccessibility
 
+        if currentlyHasAccessibility {
+            globalPushToTalkShortcutMonitor.start()
+        } else {
+            globalPushToTalkShortcutMonitor.stop()
+        }
+
+        hasScreenRecordingPermission = WindowPositionManager.hasScreenRecordingPermission()
+
+        let micAuthStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+        hasMicrophonePermission = micAuthStatus == .authorized
+
+        // Debug: log permission state on changes
+        if previouslyHadAccessibility != hasAccessibilityPermission
+            || previouslyHadScreenRecording != hasScreenRecordingPermission
+            || previouslyHadMicrophone != hasMicrophonePermission {
+            print("🔑 Permissions — accessibility: \(hasAccessibilityPermission), screen: \(hasScreenRecordingPermission), mic: \(hasMicrophonePermission), screenContent: \(hasScreenContentPermission)")
+        }
+
+        // Track individual permission grants as they happen
+        if !previouslyHadAccessibility && hasAccessibilityPermission {
+            ScreenGuideAnalytics.trackPermissionGranted(permission: "accessibility")
+        }
+        if !previouslyHadScreenRecording && hasScreenRecordingPermission {
+            ScreenGuideAnalytics.trackPermissionGranted(permission: "screen_recording")
+        }
+        if !previouslyHadMicrophone && hasMicrophonePermission {
+            ScreenGuideAnalytics.trackPermissionGranted(permission: "microphone")
+        }
+        // Screen content permission is persisted — once the user has approved the
+        // SCShareableContent picker, we don't need to re-check it.
+        if !hasScreenContentPermission {
+            hasScreenContentPermission = UserDefaults.standard.bool(forKey: "hasScreenContentPermission")
+        }
+
+        if !previouslyHadAll && allPermissionsGranted {
+            ScreenGuideAnalytics.trackAllPermissionsGranted()
+        }
+    }
+
+    /// Triggers the macOS screen content picker by performing a dummy
+    /// screenshot capture. Once the user approves, we persist the grant
+    /// so they're never asked again during onboarding.
+    @Published private(set) var isRequestingScreenContent = false
+
+    func requestScreenContentPermission() {
+        guard !isRequestingScreenContent else { return }
+        isRequestingScreenContent = true
+        Task {
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                guard let display = content.displays.first else {
+                    await MainActor.run { isRequestingScreenContent = false }
+                    return
+                }
+                let filter = SCContentFilter(display: display, excludingWindows: [])
+                let config = SCStreamConfiguration()
+                config.width = 320
+                config.height = 240
+                let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                // Verify the capture actually returned real content — a 0x0 or
+                // fully-empty image means the user denied the prompt.
+                let didCapture = image.width > 0 && image.height > 0
+                print("🔑 Screen content capture result — width: \(image.width), height: \(image.height), didCapture: \(didCapture)")
+                await MainActor.run {
+                    isRequestingScreenContent = false
+                    guard didCapture else { return }
+                    hasScreenContentPermission = true
+                    UserDefaults.standard.set(true, forKey: "hasScreenContentPermission")
+                    ScreenGuideAnalytics.trackPermissionGranted(permission: "screen_content")
+
