@@ -317,3 +317,32 @@ def find_target(
         llm_provider: BaseLLMProvider instance — needed only for vision fallback.
         skip_*:       Force-skip a tier (for testing or perf-sensitive paths).
 
+    Returns:
+        Target with .center_xy in logical screen pixels, or None.
+    """
+    if not query or not query.strip():
+        return None
+
+    # Tier 1: UIA — fast, free, often perfect
+    if not skip_uia:
+        t = _find_via_uia(query)
+        if t is not None and t.confidence >= 0.5:
+            return t
+
+    # Tier 2: OCR — text-based fallback for canvas apps
+    if not skip_ocr:
+        t = _find_via_ocr(query, pil_image=pil_image)
+        if t is not None and t.confidence >= 0.5:
+            return t
+
+    # Tier 3: vision LLM grid — last resort
+    if not skip_vision and screenshot is not None and llm_provider is not None:
+        t = _find_via_vision(query, screenshot, llm_provider)
+        if t is not None:
+            return t
+
+    log.info("All pointer tiers failed for query: %r", query)
+    return None
+
+
+__all__ = ["Target", "find_target"]
