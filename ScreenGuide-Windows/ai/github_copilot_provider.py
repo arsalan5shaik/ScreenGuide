@@ -358,3 +358,72 @@ def pick_default_free_model() -> str:
     # Should never happen, but don't crash
     return FALLBACK_MODEL
 
+
+def model_label(model_id: str) -> str:
+    """Pretty UI label: 'gpt-4o-mini  (free)' or 'claude-3.5-sonnet  (1×)'."""
+    for m in cached_models():
+        if m["id"] == model_id:
+            mult = m["multiplier"]
+            tag = "free" if mult == 0 else (
+                f"{mult:g}×" if mult != 1 else "1× premium"
+            )
+            return f"{model_id}  ({tag})"
+    return model_id
+
+
+def sorted_model_ids() -> list[str]:
+    """All Copilot model IDs, free ones first, then by ascending multiplier."""
+    models = cached_models()
+    models = sorted(models, key=lambda m: (m["multiplier"], not m["vision"], m["id"]))
+    return [m["id"] for m in models]
+
+
+# ─── Provider ─────────────────────────────────────────────────────────────────
+
+class GitHubCopilotProvider(BaseLLMProvider):
+
+    def __init__(self):
+        self._gh_token = load_github_token()
+        if not self._gh_token:
+            raise RuntimeError(
+                "GitHub Copilot not signed in. Run:  python -m ai.github_copilot_provider login"
+            )
+        self._copilot_token: Optional[str] = None
+        self._copilot_token_expires: float = 0.0
+
+    async def _get_copilot_token(self, client: httpx.AsyncClient) -> str:
+        # Short-lived token, refresh with ~2 min buffer
+        if self._copilot_token and time.time() < self._copilot_token_expires - 120:
+            return self._copilot_token
+        r = await client.get(
+            COPILOT_TOKEN_URL,
+            headers={
+                "Authorization": f"token {self._gh_token}",
+                "Editor-Version": EDITOR_VERSION,
+                "Editor-Plugin-Version": EDITOR_PLUGIN,
+                "User-Agent": USER_AGENT,
+            },
+        )
+        if r.status_code == 401:
+            raise RuntimeError(
+                "GitHub rejected your token. Sign in again: Tray → Model → "
+                "Sign in to GitHub Copilot…"
+            )
+        if r.status_code == 403:
+            body = (r.text or "")[:300]
+            raise RuntimeError(
+                "Your GitHub account has no active Copilot Chat seat. Verify "
+                "at https://github.com/settings/copilot. Server said: " + body
+            )
+        r.raise_for_status()
+        data = r.json()
+        self._copilot_token = data["token"]
+        self._copilot_token_expires = float(data.get("expires_at", time.time() + 1500))
+        # Useful flags for diagnostics — log if Chat is disabled on this seat
+        if data.get("chat_enabled") is False:
+            raise RuntimeError(
+                "Copilot Chat is disabled on this seat. Enable it at "
+                "https://github.com/settings/copilot (toggle 'Copilot Chat')."
+            )
+        return self._copilot_token
+
