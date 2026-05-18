@@ -427,3 +427,86 @@ class GitHubCopilotProvider(BaseLLMProvider):
             )
         return self._copilot_token
 
+    async def stream_response(
+        self,
+        user_text: str,
+        screenshots_b64: List[str],
+        history: List[Message],
+        system_prompt: str,
+        model: str | None = None,
+    ) -> AsyncIterator[str]:
+        # Dynamic default — picks the best free + vision-capable model from
+        # whatever GitHub currently exposes for this seat.
+        model = model or pick_default_free_model()
+
+        messages: list[dict] = [{"role": "system", "content": system_prompt}]
+        for msg in history:
+            messages.append({"role": msg.role, "content": msg.content})
+
+        # Vision: Copilot's OpenAI-compatible endpoint supports image_url parts
+        # on vision-capable models (gpt-4o, gpt-4o-mini). Encode as data URIs.
+        content_parts: list = []
+        for img_b64 in screenshots_b64:
+            content_parts.append({
+                "type": "image_url",
+                "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
+            })
+        content_parts.append({"type": "text", "text": user_text})
+        messages.append({"role": "user", "content": content_parts if screenshots_b64 else user_text})
+
+        async with httpx.AsyncClient(timeout=120) as client:
+            tok = await self._get_copilot_token(client)
+            headers = {
+                "Authorization": f"Bearer {tok}",
+                "Editor-Version": EDITOR_VERSION,
+                "Editor-Plugin-Version": EDITOR_PLUGIN,
+                "Copilot-Integration-Id": "vscode-chat",
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+            }
+            body = {
+                "model": model,
+                "messages": messages,
+                "max_tokens": MAX_TOKENS,
+                "temperature": 0.7,
+                "stream": True,
+            }
+            async with client.stream("POST", COPILOT_CHAT_URL, json=body, headers=headers) as r:
+                if r.status_code >= 400:
+                    err = await r.aread()
+                    snippet = (err.decode("utf-8", "replace") or "")[:400]
+                    if r.status_code == 400 and "model" in snippet.lower():
+                        raise RuntimeError(
+                            f"Copilot rejected model '{model}'. It may have been "
+                            f"removed by GitHub. Use Tray → Model → Refresh "
+                            f"Copilot models. Server: {snippet}"
+                        )
+                    if r.status_code == 402:
+                        raise RuntimeError(
+                            f"Copilot says you've hit your premium-request quota. "
+                            f"Switch to a free model (Tray → Model). Server: {snippet}"
+                        )
+                    if r.status_code == 403:
+                        raise RuntimeError(
+                            f"Copilot Chat seat issue. Check "
+                            f"https://github.com/settings/copilot. Server: {snippet}"
+                        )
+                    raise RuntimeError(
+                        f"Copilot HTTP {r.status_code}: {snippet}"
+                    )
+                async for line in r.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data = line[6:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        obj = json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
+                    for choice in obj.get("choices", []):
+                        delta = choice.get("delta", {})
+                        text = delta.get("content")
+                        if text:
+                            yield text
+
