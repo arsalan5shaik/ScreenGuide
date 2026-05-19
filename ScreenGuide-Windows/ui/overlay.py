@@ -501,3 +501,57 @@ class CursorOverlay(QWidget):
             self._display_pos.y() + self._vel.y(),
         )
 
+        self._phase += 0.10
+        self._spin_phase += 0.14  # ~0.8s per rev @ 60fps matches Swift
+        self._ring_phase += 0.08
+
+        self.update()
+
+    # ── Painting ──────────────────────────────────────────────────────────────
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Ring goes UNDER the buddy
+        if self._ring is not None and self._flight_phase in (
+            _PHASE_DWELLING, _PHASE_FLYING
+        ):
+            self._draw_ring(p)
+
+        # Whiteboard annotations — drawn under the buddy too
+        if self._annotations:
+            self._draw_annotations(p)
+
+        cx = self._display_pos.x() - self.x()
+        cy = self._display_pos.y() - self.y()
+
+        if self._mode == MODE_LISTENING:
+            self._draw_waveform(p, cx, cy)
+        elif self._mode == MODE_THINKING:
+            self._draw_spinner(p, cx, cy)
+        else:
+            # idle, speaking, pointing
+            self._draw_triangle(p, cx, cy)
+
+        if self._locked_pos is not None and self._bubble_text:
+            self._draw_bubble(p, cx, cy, self._bubble_text)
+
+        p.end()
+
+    def _draw_annotations(self, p):
+        """Render teaching shapes with progressive draw-in animation.
+
+        Each shape animates from 0→100% over SHAPE_DRAW_SECONDS starting at
+        its queued "start" time. Shapes with ttl=None persist at full alpha;
+        shapes with a ttl fade out over their last 25%.
+        """
+        now = time.monotonic()
+        keep = []
+        for ann in self._annotations:
+            u = (now - ann["start"]) / ann.get("dur", 0.6)
+            if u <= 0:
+                keep.append(ann)     # queued, not started yet
+                continue
+            u = min(1.0, u)
+
