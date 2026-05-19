@@ -284,3 +284,6 @@ class Config:
         else:
             self.ollama_text_model = name
 
+
+# Singleton
+cfg = Config()
