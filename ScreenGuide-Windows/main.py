@@ -394,3 +394,5 @@ def main():
 _setup_keepalive: list = [None]
 
 
+if __name__ == "__main__":
+    main()
