@@ -154,3 +154,12 @@ def is_quiz_review(q: str) -> bool:
 
 # ── Privacy guard — block sensitive windows from being screenshotted ──────────
 
+PRIVACY_BLOCKLIST = (
+    r"\b(password|credential|secret|keepass|bitwarden|1password|lastpass|"
+    r"authenticator|banking|sign\s*in|login|\.env)\b"
+)
+_PRIVACY_RE = re.compile(PRIVACY_BLOCKLIST, re.IGNORECASE)
+
+
+def is_sensitive_window(title: str) -> bool:
+    return bool(title) and _PRIVACY_RE.search(title) is not None
