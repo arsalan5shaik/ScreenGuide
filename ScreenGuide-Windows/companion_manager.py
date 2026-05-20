@@ -621,3 +621,56 @@ class CompanionManager(QObject):
             except Exception as e:
                 self.sig_error.emit(f"Skill error: {e}")
 
+            # 2. Screen capture — skipped if sensitive window (password manager etc.)
+            #
+            # ALSO skipped for "who is X" / "tell me about X" identity questions:
+            # OpenAI + Claude refuse to identify people in screenshots even when
+            # the answer is in their training data ("Sorry I can't identify the
+            # person in images"). Stripping the screenshot lets the LLM answer
+            # from training data + web search instead, which is what the user
+            # actually wants when they ask "who is MrBeast" while on YouTube.
+            sensitive = self._privacy_guard and is_sensitive_window(title)
+            identity_q = is_identity_question(transcript)
+            if sensitive or identity_q:
+                screenshots = []
+                images_b64 = []
+            else:
+                screenshots = capture_all_screens()
+                images_b64 = [s.base64_jpeg for s in screenshots]
+            # Fresh question → wipe the previous lesson's drawings and remember
+            # this turn's screenshots for coordinate mapping.
+            self._screens_ctx = screenshots
+            self.sig_clear_drawings.emit()
+
+            # Local figure detection (OpenCV) — finds triangles/rects/circles
+            # with EXACT normalized vertices so any LLM (even small Ollama
+            # models) can draw on them accurately by echoing the numbers.
+            self._figures_ctx = []
+            fig_extra = ""
+            if screenshots:
+                try:
+                    from ai.figure_detector import detect_figures, figures_prompt
+                    self._figures_ctx = await asyncio.to_thread(
+                        detect_figures, screenshots[0].base64_jpeg,
+                    )
+                    fig_extra = figures_prompt(self._figures_ctx)
+                except Exception:
+                    self._figures_ctx = []
+
+            # 3. Parallel side-work: web search + element locator
+            #
+            # Pointing now works for EVERY provider:
+            #   • If ANTHROPIC_API_KEY is set → use Claude Computer Use
+            #     (~5px accuracy, gold standard).
+            #   • Otherwise → universal grid-based locator with the active
+            #     vision LLM (Copilot GPT-4o, OpenAI, Gemini, Ollama llava).
+            #     ~25-50px accuracy. Good enough for buttons/menus/icons.
+            locate_triggered = is_locate(transcript)
+            multistep = is_multistep(transcript)
+
+            search_task = None
+            locate_task = None
+            if self._web_search_enabled:
+                from ai.web_search import search
+                search_task = asyncio.create_task(search(transcript))
+
