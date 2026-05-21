@@ -165,3 +165,57 @@ class TrayManager(QObject):
         scope_action = menu.addAction(scope_label)
         scope_action.triggered.connect(self._prompt_custom_instructions)
 
+        # ── Tutor toggles ──
+        menu.addSeparator()
+        tutor_menu = menu.addMenu("Tutor Mode")
+
+        slow_action = tutor_menu.addAction(
+            "Slow Mode (teacher pace): ON" if self._slow_enabled
+            else "Slow Mode (teacher pace): OFF"
+        )
+        slow_action.setCheckable(True)
+        slow_action.setChecked(self._slow_enabled)
+        slow_action.triggered.connect(self._toggle_slow)
+        self._slow_action = slow_action
+
+        quiz_action = tutor_menu.addAction(
+            "Quiz Mode: ON" if self._quiz_enabled else "Quiz Mode: OFF"
+        )
+        quiz_action.setCheckable(True)
+        quiz_action.setChecked(self._quiz_enabled)
+        quiz_action.triggered.connect(self._toggle_quiz)
+        self._quiz_action = quiz_action
+
+        privacy_action = tutor_menu.addAction(
+            "Privacy Guard: ON" if self._privacy_enabled
+            else "Privacy Guard: OFF"
+        )
+        privacy_action.setCheckable(True)
+        privacy_action.setChecked(self._privacy_enabled)
+        privacy_action.triggered.connect(self._toggle_privacy)
+        self._privacy_action = privacy_action
+
+        code_action = tutor_menu.addAction(
+            "Code Mode (auto): ON" if self._code_enabled else "Code Mode (auto): OFF"
+        )
+        code_action.setCheckable(True)
+        code_action.setChecked(self._code_enabled)
+        code_action.triggered.connect(self._toggle_code)
+        self._code_action = code_action
+
+        ml_action = tutor_menu.addAction(
+            "Multilingual: ON" if self._multilang_enabled else "Multilingual: OFF"
+        )
+        ml_action.setCheckable(True)
+        ml_action.setChecked(self._multilang_enabled)
+        ml_action.triggered.connect(self._toggle_multilang)
+        self._ml_action = ml_action
+
+        ocr_action = tutor_menu.addAction(
+            "OCR Fallback: ON" if self._ocr_enabled else "OCR Fallback: OFF"
+        )
+        ocr_action.setCheckable(True)
+        ocr_action.setChecked(self._ocr_enabled)
+        ocr_action.triggered.connect(self._toggle_ocr)
+        self._ocr_action = ocr_action
+
