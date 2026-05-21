@@ -215,3 +215,56 @@ class SetupWizard(QDialog):
             self.skip_btn.setText("Skip — add later")
             self.status.setText("")
 
+        elif step == "pulling_vision":
+            self.title.setText(f"Pulling {cfg.ollama_vision_model}…")
+            self.action_btn.setEnabled(False)
+            self.skip_btn.setEnabled(False)
+            self.status.setText("Connecting to Ollama…")
+            self.progress.show()
+
+        elif step == "done":
+            self.title.setText("All set 🎉")
+            from config import cfg
+            _hk = "+".join(p.strip().capitalize() for p in cfg.hotkey.split("+"))
+            self.subtitle.setText(
+                f"ScreenGuide is ready. Hold {_hk} anywhere on Windows, "
+                "or just say \"ScreenGuide\" to start a conversation."
+            )
+            self.action_btn.setText("Start using ScreenGuide")
+            self.action_btn.setEnabled(True)
+            self.skip_btn.hide()
+            self.status.setText("")
+            mark_setup_complete()
+
+    # ── Handlers ─────────────────────────────────────────────────────────────
+
+    def _on_action(self):
+        s = self._step
+        if s == "intro":
+            if ob.is_ollama_running():
+                self._goto_next_model_step()
+            else:
+                self._set_step("installing")
+                self._start_install_worker()
+
+        elif s == "text_model":
+            self._set_step("pulling_text")
+            self._start_pull_worker(cfg.ollama_text_model, next_step="vision_model")
+
+        elif s == "vision_model":
+            self._set_step("pulling_vision")
+            self._start_pull_worker(cfg.ollama_vision_model, next_step="done")
+
+        elif s == "done":
+            self.accept()
+
+    def _on_skip(self):
+        s = self._step
+        if s == "intro":
+            mark_setup_complete()
+            self.reject()
+        elif s == "text_model":
+            self._set_step("vision_model")
+        elif s == "vision_model":
+            self._set_step("done")
+
