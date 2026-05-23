@@ -205,3 +205,68 @@ private final class AssemblyAIStreamingTranscriptionSession: NSObject, BuddyStre
         sendJSONMessage(["type": "ForceEndpoint"])
     }
 
+    func cancel() {
+        stateQueue.async {
+            self.explicitFinalTranscriptDeadlineWorkItem?.cancel()
+            self.explicitFinalTranscriptDeadlineWorkItem = nil
+        }
+
+        sendJSONMessage(["type": "Terminate"])
+        webSocketTask?.cancel(with: .goingAway, reason: nil)
+    }
+
+    private func receiveNextMessage() {
+        webSocketTask?.receive { [weak self] result in
+            guard let self else { return }
+
+            switch result {
+            case .success(let message):
+                switch message {
+                case .string(let text):
+                    self.handleIncomingTextMessage(text)
+                case .data(let data):
+                    if let text = String(data: data, encoding: .utf8) {
+                        self.handleIncomingTextMessage(text)
+                    }
+                @unknown default:
+                    break
+                }
+
+                self.receiveNextMessage()
+            case .failure(let error):
+                self.failSession(with: error)
+            }
+        }
+    }
+
+    private func handleIncomingTextMessage(_ text: String) {
+        guard let messageData = text.data(using: .utf8) else { return }
+
+        do {
+            let envelope = try JSONDecoder().decode(MessageEnvelope.self, from: messageData)
+
+            switch envelope.type.lowercased() {
+            case "begin":
+                resolveReadyContinuationIfNeeded(with: .success(()))
+            case "turn":
+                let turnMessage = try JSONDecoder().decode(TurnMessage.self, from: messageData)
+                handleTurnMessage(turnMessage)
+            case "termination":
+                resolveReadyContinuationIfNeeded(with: .success(()))
+                stateQueue.async {
+                    if self.isAwaitingExplicitFinalTranscript && !self.hasDeliveredFinalTranscript {
+                        self.deliverFinalTranscriptIfNeeded(self.bestAvailableTranscriptText())
+                    }
+                }
+            case "error":
+                let errorMessage = try JSONDecoder().decode(ErrorMessage.self, from: messageData)
+                let messageText = errorMessage.error ?? errorMessage.message ?? "AssemblyAI returned an error."
+                failSession(with: AssemblyAIStreamingTranscriptionProviderError(message: messageText))
+            default:
+                break
+            }
+        } catch {
+            failSession(with: error)
+        }
+    }
+
