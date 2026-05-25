@@ -268,3 +268,54 @@ class SetupWizard(QDialog):
         elif s == "vision_model":
             self._set_step("done")
 
+    # ── Workers (run on a background thread) ─────────────────────────────────
+
+    def _start_install_worker(self):
+        def _worker():
+            try:
+                self.progress_signal.emit("Downloading Ollama installer…", 0.0)
+                path = ob.download_ollama_installer(
+                    on_progress=lambda pct: self.progress_signal.emit(
+                        f"Downloading… {pct:.0f}%", pct
+                    )
+                )
+                self.progress_signal.emit("Launching installer (approve any UAC prompts)…", 100.0)
+                ob.run_ollama_installer(path, silent=False)
+                self.progress_signal.emit("Waiting for Ollama to start…", 100.0)
+                ok = ob.wait_for_ollama_server(timeout=90)
+                if ok:
+                    self.finished_signal.emit(True, "")
+                else:
+                    self.finished_signal.emit(
+                        False,
+                        "Ollama installed but didn't come online. Try rebooting, "
+                        "or open Ollama from the Start menu, then re-run setup."
+                    )
+            except Exception as e:
+                self.finished_signal.emit(False, f"Install failed: {e}")
+
+        self._worker = threading.Thread(target=_worker, daemon=True)
+        self._worker.start()
+
+    def _start_pull_worker(self, model: str, next_step: str):
+        self._next_step = next_step
+
+        def _worker():
+            if ob.is_model_installed(model):
+                self.finished_signal.emit(True, "")
+                return
+            ok = ob.pull_model(
+                model,
+                on_progress=lambda status, pct: self.progress_signal.emit(
+                    f"{status} ({pct:.0f}%)" if pct else status, pct
+                ),
+            )
+            self.finished_signal.emit(ok, "" if ok else f"Could not pull {model}.")
+
+        self._worker = threading.Thread(target=_worker, daemon=True)
+        self._worker.start()
+
+    def _on_progress(self, status: str, pct: float):
+        self.status.setText(status)
+        self.progress.setValue(int(pct))
+
