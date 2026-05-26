@@ -674,3 +674,69 @@ class CompanionManager(QObject):
                 from ai.web_search import search
                 search_task = asyncio.create_task(search(transcript))
 
+            if screenshots and locate_triggered:
+                shot = screenshots[0]
+                # Pointing accuracy upgrade: try the hybrid pointer first.
+                # Tier 1 (UIA tree) is ~5ms and pixel-perfect; tier 2 (OCR)
+                # handles canvas apps. Falls through to the vision LLM grid
+                # below only when both whiff.
+                try:
+                    from ai.hybrid_pointer import find_target as _hybrid_find
+                    target = _hybrid_find(
+                        transcript,
+                        screenshot=shot,
+                        llm_provider=self._get_llm(),
+                    )
+                except Exception:
+                    target = None
+
+                if target is not None and target.source in ("uia", "ocr"):
+                    # UIA / OCR coordinates are PHYSICAL pixels; the overlay
+                    # draws in LOGICAL pixels — divide by the DPI scale.
+                    # (Also: return an object with .x/.y — downstream code
+                    # accesses attributes, a bare tuple would crash it.)
+                    from types import SimpleNamespace
+                    _scale = shot.dpi_scale or 1.0
+                    _pt = SimpleNamespace(x=target.x / _scale,
+                                          y=target.y / _scale)
+                    async def _ready(pt=_pt):
+                        return pt
+                    locate_task = asyncio.create_task(_ready())
+                elif cfg.anthropic_api_key:
+                    # Path A — Anthropic Computer Use (best accuracy)
+                    from ai.element_locator import detect_element
+                    locate_task = asyncio.create_task(detect_element(
+                        screenshot_jpeg_b64=shot.base64_jpeg,
+                        original_width=shot.width,
+                        original_height=shot.height,
+                        physical_width=shot.physical_width,
+                        physical_height=shot.physical_height,
+                        physical_left=shot.physical_left,
+                        physical_top=shot.physical_top,
+                        dpi_scale=shot.dpi_scale,
+                        screen_index=shot.index,
+                        user_question=transcript,
+                    ))
+                else:
+                    # Path B — Universal grid locator (any vision LLM)
+                    try:
+                        from ai.universal_locator import detect_element_universal
+                        llm = self._get_llm()
+                        locate_task = asyncio.create_task(detect_element_universal(
+                            llm=llm,
+                            screenshot_jpeg_b64=shot.base64_jpeg,
+                            original_width=shot.width,
+                            original_height=shot.height,
+                            physical_width=shot.physical_width,
+                            physical_height=shot.physical_height,
+                            physical_left=shot.physical_left,
+                            physical_top=shot.physical_top,
+                            dpi_scale=shot.dpi_scale,
+                            screen_index=shot.index,
+                            user_question=transcript,
+                            model=self._current_model,
+                        ))
+                    except Exception:
+                        # Universal locator should never crash the main flow
+                        locate_task = None
+
