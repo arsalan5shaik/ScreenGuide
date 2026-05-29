@@ -294,3 +294,53 @@ struct BlueCursorView: View {
                     }
             }
 
+            // Blue triangle cursor — shown when idle or while TTS is playing (responding).
+            // All three states (triangle, waveform, spinner) stay in the view tree
+            // permanently and cross-fade via opacity so SwiftUI doesn't remove/re-insert
+            // them (which caused a visible cursor "pop").
+            //
+            // During cursor following: fast spring animation for snappy tracking.
+            // During navigation: NO implicit animation — the frame-by-frame bezier
+            // timer controls position directly at 60fps for a smooth arc flight.
+            Triangle()
+                .fill(DS.Colors.overlayCursorBlue)
+                .frame(width: 16, height: 16)
+                .rotationEffect(.degrees(triangleRotationDegrees))
+                .shadow(color: DS.Colors.overlayCursorBlue, radius: 8 + (buddyFlightScale - 1.0) * 20, x: 0, y: 0)
+                .scaleEffect(buddyFlightScale)
+                .opacity(buddyIsVisibleOnThisScreen && (companionManager.voiceState == .idle || companionManager.voiceState == .responding) ? cursorOpacity : 0)
+                .position(cursorPosition)
+                .animation(
+                    buddyNavigationMode == .followingCursor
+                        ? .spring(response: 0.2, dampingFraction: 0.6, blendDuration: 0)
+                        : nil,
+                    value: cursorPosition
+                )
+                .animation(.easeIn(duration: 0.25), value: companionManager.voiceState)
+                .animation(
+                    buddyNavigationMode == .navigatingToTarget ? nil : .easeInOut(duration: 0.3),
+                    value: triangleRotationDegrees
+                )
+
+            // Blue waveform — replaces the triangle while listening
+            BlueCursorWaveformView(audioPowerLevel: companionManager.currentAudioPowerLevel)
+                .opacity(buddyIsVisibleOnThisScreen && companionManager.voiceState == .listening ? cursorOpacity : 0)
+                .position(cursorPosition)
+                .animation(.spring(response: 0.2, dampingFraction: 0.6, blendDuration: 0), value: cursorPosition)
+                .animation(.easeIn(duration: 0.15), value: companionManager.voiceState)
+
+            // Blue spinner — shown while the AI is processing (transcription + Claude + waiting for TTS)
+            BlueCursorSpinnerView()
+                .opacity(buddyIsVisibleOnThisScreen && companionManager.voiceState == .processing ? cursorOpacity : 0)
+                .position(cursorPosition)
+                .animation(.spring(response: 0.2, dampingFraction: 0.6, blendDuration: 0), value: cursorPosition)
+                .animation(.easeIn(duration: 0.15), value: companionManager.voiceState)
+
+        }
+        .frame(width: screenFrame.width, height: screenFrame.height)
+        .ignoresSafeArea()
+        .onAppear {
+            // Set initial cursor position immediately before starting animation
+            let mouseLocation = NSEvent.mouseLocation
+            isCursorOnThisScreen = screenFrame.contains(mouseLocation)
+
