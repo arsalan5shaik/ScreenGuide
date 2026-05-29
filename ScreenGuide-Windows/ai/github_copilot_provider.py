@@ -510,3 +510,42 @@ class GitHubCopilotProvider(BaseLLMProvider):
                         if text:
                             yield text
 
+    async def health_check(self) -> bool:
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                await self._get_copilot_token(client)
+            return True
+        except Exception:
+            return False
+
+
+# ─── CLI entry: `python -m ai.github_copilot_provider login` ──────────────────
+
+if __name__ == "__main__":
+    cmd = sys.argv[1] if len(sys.argv) >= 2 else ""
+    if cmd == "login":
+        asyncio.run(device_login())
+    elif cmd == "status":
+        print("signed in" if is_authenticated() else "not signed in")
+        print("token file:", _token_path())
+        print("models cache:", _models_cache_path(),
+              "(stale)" if cache_is_stale() else "(fresh)")
+    elif cmd == "models":
+        # Show what's currently cached
+        for m in cached_models():
+            tag = "FREE" if m["multiplier"] == 0 else f"{m['multiplier']:g}× premium"
+            vision = "👁 " if m["vision"] else "   "
+            print(f"  {vision}{m['id']:30s}  {tag:14s}  {m['vendor']}")
+    elif cmd == "refresh":
+        models = asyncio.run(refresh_models_to_cache())
+        print(f"Refreshed {len(models)} models → {_models_cache_path()}")
+        for m in models:
+            tag = "FREE" if m["multiplier"] == 0 else f"{m['multiplier']:g}×"
+            print(f"  {m['id']:30s}  {tag}")
+    elif cmd == "logout":
+        for p in (_token_path(), _models_cache_path()):
+            if p.exists():
+                p.unlink()
+                print(f"removed {p}")
+    else:
+        print("Usage: python -m ai.github_copilot_provider [login|status|models|refresh|logout]")
