@@ -740,3 +740,57 @@ class CompanionManager(QObject):
                         # Universal locator should never crash the main flow
                         locate_task = None
 
+            search_results = ""
+            if search_task:
+                try:
+                    search_results = await search_task or ""
+                except Exception:
+                    search_results = ""
+
+            detected = None
+            detected_coord = None
+            if locate_task:
+                try:
+                    detected = await locate_task
+                except Exception:
+                    detected = None
+            if detected:
+                # Short label guess — first noun phrase after "the"/"where"
+                label = _guess_label(transcript)
+                # Prompt wants NORMALIZED 0-1000 coords (the model echoes them
+                # into [POINT:...] which _parse_points denormalizes back).
+                ndx, ndy = self._norm(detected.x, detected.y)
+                detected_coord = (ndx, ndy, label)
+                # Fire the overlay NOW so the buddy flies over while the LLM
+                # still thinks. Hold dwell until TTS completes.
+                self.sig_point_hold.emit(True)
+                pointing_held = True
+                self.sig_point_at.emit(
+                    float(detected.x), float(detected.y), label,
+                )
+
+            # ── Per-turn enrichment: code mode, language, OCR, attached docs ──
+            code_active = self._code_mode_auto and code_mode.is_code_window(title)
+            if cfg.response_language:
+                lang_code = cfg.response_language   # user-forced — always wins
+            else:
+                lang_code = (multilang.detect_language(transcript)
+                             if self._multilang else "en")
+
+            # OCR fallback for fine print (only if user actually asks to read)
+            ocr_extra = ""
+            if self._ocr_enabled and screenshots and ocr.needs_ocr(transcript):
+                try:
+                    import base64
+                    jpeg = base64.b64decode(screenshots[0].base64_jpeg)
+                    txt = ocr.run_ocr(jpeg)
+                    if txt:
+                        ocr_extra = ocr.format_for_prompt(txt)
+                except Exception:
+                    pass
+
+            # Attached documents (drag-dropped PDFs etc.)
+            doc_extra = ""
+            for fname, text in self._attached_docs:
+                doc_extra += pdf_context.format_for_prompt(fname, text)
+
