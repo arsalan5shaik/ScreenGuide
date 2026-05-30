@@ -152,3 +152,61 @@ enum DS {
         static let floatingGradientPink = Color(hex: "#E84D9E")
         static let floatingGradientOrange = Color(hex: "#FF8C33")
 
+        // ── Help Chat ──────────────────────────────────────────────
+
+        /// User message bubble background in the help chat.
+        /// Blue 800 — deep blue that's clearly distinct from the dark surface
+        /// while keeping white text highly readable (~9:1 contrast).
+        static let helpChatUserBubble = blue800
+
+        /// Slightly lighter variant for hover/pressed states on user bubbles.
+        static let helpChatUserBubbleHover = blue700
+
+        /// Footer/backdrop behind the floating help chat.
+        /// Slightly lighter than the main window background so the chat zone reads
+        /// as a distinct docked surface even before the pill input is visible.
+        static let helpChatBackdrop = Color(hex: "#212121")
+
+        // ── Disabled State ───────────────────────────────────────────
+        // Following Material Design 3's disabled pattern:
+        // Container: onSurface at 12% opacity
+        // Content: onSurface at 38% opacity
+
+        /// Disabled button/container background.
+        static var disabledBackground: Color {
+            textPrimary.opacity(0.12)
+        }
+
+        /// Disabled text/icon color.
+        static var disabledText: Color {
+            textPrimary.opacity(0.38)
+        }
+    }
+
+    // MARK: - Spacing (for reference, not enforced)
+
+    enum Spacing {
+        static let xs: CGFloat = 4
+        static let sm: CGFloat = 8
+        static let md: CGFloat = 12
+        static let lg: CGFloat = 16
+        static let xl: CGFloat = 20
+        static let xxl: CGFloat = 24
+        static let xxxl: CGFloat = 32
+    }
+
+    // MARK: - Corner Radii
+
+    enum CornerRadius {
+        /// Small elements like tags, badges.
+        static let small: CGFloat = 6
+        /// Buttons, input fields, small cards.
+        static let medium: CGFloat = 8
+        /// Cards, dialogs, chat bubbles.
+        static let large: CGFloat = 10
+        /// Large panels, permission cards.
+        static let extraLarge: CGFloat = 12
+        /// Pill-shaped buttons (the continue button).
+        static let pill: CGFloat = .infinity
+    }
+
