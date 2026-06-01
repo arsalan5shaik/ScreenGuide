@@ -543,3 +543,53 @@ final class BuddyDictationManager: NSObject, ObservableObject {
             }
         )
 
+        self.activeTranscriptionSession = activeTranscriptionSession
+        print("🎙️ BuddyDictationManager: provider ready, starting audio engine")
+
+        let inputNode = audioEngine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+
+        inputNode.removeTap(onBus: 0)
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
+            self?.activeTranscriptionSession?.appendAudioBuffer(buffer)
+            self?.updateAudioPowerLevel(from: buffer)
+        }
+
+        audioEngine.prepare()
+        try audioEngine.start()
+    }
+
+    private func handleRecognitionError(_ error: Error) {
+        if hasFinishedCurrentDictationSession {
+            return
+        }
+
+        if isFinalizingTranscript && !latestRecognizedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            finishCurrentDictationSessionIfNeeded(
+                shouldSubmitFinalDraft: shouldAutomaticallySubmitFinalDraft
+            )
+        } else {
+            print("❌ Buddy dictation error (\(transcriptionProvider.displayName)): \(error)")
+            lastErrorMessage = userFacingErrorMessage(
+                from: error,
+                fallback: "couldn't transcribe that. try again."
+            )
+            cancelCurrentDictation(preserveDraftText: false)
+        }
+    }
+
+    private func finishCurrentDictationSessionIfNeeded(shouldSubmitFinalDraft: Bool) {
+        guard !hasFinishedCurrentDictationSession else { return }
+        hasFinishedCurrentDictationSession = true
+
+        finalizeFallbackWorkItem?.cancel()
+        finalizeFallbackWorkItem = nil
+
+        let finalDraftText = composeDraftText(withTranscribedText: latestRecognizedText)
+        let finalTranscriptText = latestRecognizedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let currentDraftCallbacks = draftCallbacks
+
+        if !shouldSubmitFinalDraft && !finalDraftText.isEmpty {
+            currentDraftCallbacks?.updateDraftText(finalDraftText)
+        }
+
