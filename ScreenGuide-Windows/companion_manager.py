@@ -794,3 +794,57 @@ class CompanionManager(QObject):
             for fname, text in self._attached_docs:
                 doc_extra += pdf_context.format_for_prompt(fname, text)
 
+            # 4. Build system prompt with all context
+            system = _build_system_prompt(
+                window_title=title,
+                lesson_step=self._lesson_step_idx,
+                total_steps=len(self._lesson_steps),
+                quiz_mode=self._quiz_mode,
+                detected_coord=detected_coord,
+                code_active=code_active,
+                language_code=lang_code,
+                extra=ocr_extra + doc_extra + fig_extra,
+            )
+            if sensitive:
+                system += (
+                    "\n\nPRIVACY GUARD: the user's active window looks sensitive "
+                    "(password manager, banking, login). I did NOT take a "
+                    "screenshot. Answer from memory only, and tell the user you "
+                    "skipped the screenshot for safety.\n"
+                )
+            if search_results:
+                from ai.web_search import build_search_context
+                system += build_search_context(search_results)
+
+            # Use per-app history so context doesn't bleed between apps
+            history = self._app_memory.setdefault(ak, [])
+
+            # 5. Stream LLM — buffer partial [POINT:...] tags so they never leak
+            full_response = ""
+            display_buf = ""
+            self._cancel_flag = False
+            async for chunk in self._get_llm().stream_response(
+                user_text=transcript,
+                screenshots_b64=images_b64,
+                history=history,
+                system_prompt=system,
+                model=self._current_model,
+            ):
+                if self._cancel_flag:
+                    break
+                full_response += chunk
+                display_buf += chunk
+                self._parse_points(display_buf)
+                display_buf = ANY_TAG_RE.sub("", display_buf)
+                m = ANY_PARTIAL_RE.search(display_buf)
+                if m:
+                    flush = display_buf[: m.start()]
+                    display_buf = display_buf[m.start():]
+                else:
+                    flush = display_buf
+                    display_buf = ""
+                if flush:
+                    self.sig_response_chunk.emit(flush)
+            if display_buf:
+                self.sig_response_chunk.emit(ANY_TAG_RE.sub("", display_buf))
+
