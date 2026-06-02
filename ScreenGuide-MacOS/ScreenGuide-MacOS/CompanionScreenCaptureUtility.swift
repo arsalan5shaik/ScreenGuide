@@ -110,3 +110,23 @@ enum CompanionScreenCaptureUtility {
                 screenLabel = "screen \(displayIndex + 1) of \(sortedDisplays.count) — secondary screen"
             }
 
+            capturedScreens.append(CompanionScreenCapture(
+                imageData: jpegData,
+                label: screenLabel,
+                isCursorScreen: isCursorScreen,
+                displayWidthInPoints: Int(displayFrame.width),
+                displayHeightInPoints: Int(displayFrame.height),
+                displayFrame: displayFrame,
+                screenshotWidthInPixels: configuration.width,
+                screenshotHeightInPixels: configuration.height
+            ))
+        }
+
+        guard !capturedScreens.isEmpty else {
+            throw NSError(domain: "CompanionScreenCapture", code: -2,
+                          userInfo: [NSLocalizedDescriptionKey: "Failed to capture any screen"])
+        }
+
+        return capturedScreens
+    }
+}
