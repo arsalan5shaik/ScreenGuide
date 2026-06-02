@@ -344,3 +344,65 @@ struct BlueCursorView: View {
             let mouseLocation = NSEvent.mouseLocation
             isCursorOnThisScreen = screenFrame.contains(mouseLocation)
 
+            let swiftUIPosition = convertScreenPointToSwiftUICoordinates(mouseLocation)
+            self.cursorPosition = CGPoint(x: swiftUIPosition.x + 35, y: swiftUIPosition.y + 25)
+
+            startTrackingCursor()
+
+            // Only show welcome message on first appearance (app start)
+            // and only if the cursor starts on this screen
+            if isFirstAppearance && isCursorOnThisScreen {
+                withAnimation(.easeIn(duration: 2.0)) {
+                    self.cursorOpacity = 1.0
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.bubbleOpacity = 0.0
+                    startWelcomeAnimation()
+                }
+            } else {
+                self.cursorOpacity = 1.0
+            }
+        }
+        .onDisappear {
+            timer?.invalidate()
+            navigationAnimationTimer?.invalidate()
+            companionManager.tearDownOnboardingVideo()
+        }
+        .onChange(of: companionManager.detectedElementScreenLocation) { newLocation in
+            // When a UI element location is detected, navigate the buddy to
+            // that position so it points at the element.
+            guard let screenLocation = newLocation,
+                  let displayFrame = companionManager.detectedElementDisplayFrame else {
+                return
+            }
+
+            // Only navigate if the target is on THIS screen
+            guard screenFrame.contains(CGPoint(x: displayFrame.midX, y: displayFrame.midY))
+                  || displayFrame == screenFrame else {
+                return
+            }
+
+            startNavigatingToElement(screenLocation: screenLocation)
+        }
+    }
+
+    /// Whether the buddy triangle should be visible on this screen.
+    /// True when cursor is on this screen during normal following, or
+    /// when navigating/pointing at a target on this screen. When another
+    /// screen is navigating (detectedElementScreenLocation is set but this
+    /// screen isn't the one animating), hide the cursor so only one buddy
+    /// is ever visible at a time.
+    private var buddyIsVisibleOnThisScreen: Bool {
+        switch buddyNavigationMode {
+        case .followingCursor:
+            // If another screen's BlueCursorView is navigating to an element,
+            // hide the cursor on this screen to prevent a duplicate buddy
+            if companionManager.detectedElementScreenLocation != nil {
+                return false
+            }
+            return isCursorOnThisScreen
+        case .navigatingToTarget, .pointingAtTarget:
+            return true
+        }
+    }
+
