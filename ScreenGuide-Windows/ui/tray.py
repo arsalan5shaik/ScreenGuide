@@ -219,3 +219,58 @@ class TrayManager(QObject):
         ocr_action.triggered.connect(self._toggle_ocr)
         self._ocr_action = ocr_action
 
+        # ── Journal ──
+        menu.addSeparator()
+        journal_menu = menu.addMenu("Journal")
+
+        journal_action = journal_menu.addAction(
+            "Logging: ON" if self._journal_enabled else "Logging: OFF"
+        )
+        journal_action.setCheckable(True)
+        journal_action.setChecked(self._journal_enabled)
+        journal_action.triggered.connect(self._toggle_journal)
+        self._journal_action = journal_action
+
+        open_journal = journal_menu.addAction("Open journal folder")
+        open_journal.triggered.connect(self.on_journal_open)
+
+        attach = journal_menu.addAction("Attach document (PDF / TXT / DOCX)…")
+        attach.triggered.connect(self.on_attach_doc)
+
+        # ── Recording ──
+        rec_menu = menu.addMenu("Lesson Recording")
+        if self._is_recording:
+            stop_rec = rec_menu.addAction("● Stop recording")
+            stop_rec.triggered.connect(self.on_record_stop)
+        else:
+            start_rec = rec_menu.addAction("Start recording")
+            start_rec.triggered.connect(self.on_record_start)
+
+        # ── Workflow capture ──
+        wf_menu = menu.addMenu("Workflow Capture")
+        wf_start = wf_menu.addAction("Start capturing my clicks")
+        wf_start.triggered.connect(self.on_workflow_start)
+        wf_stop  = wf_menu.addAction("Stop + send to ScreenGuide")
+        wf_stop.triggered.connect(self.on_workflow_stop)
+
+        # ── Live collaboration ──
+        # NOTE: WebRTC signalling server isn't shipped yet, so this whole
+        # menu is hidden until tutor_features/collab.py gets a real backend.
+        # The signals are still defined on this object so any existing
+        # bindings in main.py don't crash on connect().
+        # collab_menu = menu.addMenu("Live Session")  # disabled in this build
+        # host = collab_menu.addAction("Start hosting")
+        # host.triggered.connect(self.on_collab_start)
+        # join = collab_menu.addAction("Join with code…")
+        # join.triggered.connect(self.on_collab_join)
+
+        menu.addSeparator()
+
+        # ── Setup / Diagnostics ──
+        setup_menu = menu.addMenu("Setup && Diagnostics")
+        self._build_mic_submenu(setup_menu)
+        run_setup = setup_menu.addAction("Run setup wizard again…")
+        run_setup.triggered.connect(self.on_run_setup)
+        diag = setup_menu.addAction("Save diagnostics report…")
+        diag.triggered.connect(self.on_diagnostics)
+
