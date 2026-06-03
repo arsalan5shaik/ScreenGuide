@@ -406,3 +406,54 @@ struct BlueCursorView: View {
         }
     }
 
+    // MARK: - Cursor Tracking
+
+    private func startTrackingCursor() {
+        timer = Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { _ in
+            let mouseLocation = NSEvent.mouseLocation
+            self.isCursorOnThisScreen = self.screenFrame.contains(mouseLocation)
+
+            // During forward flight or pointing, the buddy is NOT interrupted by
+            // mouse movement — it completes its full animation and return flight.
+            // Only during the RETURN flight do we allow cursor movement to cancel
+            // (so the buddy snaps to following if the user moves while it's flying back).
+            if self.buddyNavigationMode == .navigatingToTarget && self.isReturningToCursor {
+                let currentMouseInSwiftUI = self.convertScreenPointToSwiftUICoordinates(mouseLocation)
+                let distanceFromNavigationStart = hypot(
+                    currentMouseInSwiftUI.x - self.cursorPositionWhenNavigationStarted.x,
+                    currentMouseInSwiftUI.y - self.cursorPositionWhenNavigationStarted.y
+                )
+                if distanceFromNavigationStart > 100 {
+                    cancelNavigationAndResumeFollowing()
+                }
+                return
+            }
+
+            // During forward navigation or pointing, just skip cursor tracking
+            if self.buddyNavigationMode != .followingCursor {
+                return
+            }
+
+            // Normal cursor following
+            let swiftUIPosition = self.convertScreenPointToSwiftUICoordinates(mouseLocation)
+            let buddyX = swiftUIPosition.x + 35
+            let buddyY = swiftUIPosition.y + 25
+            self.cursorPosition = CGPoint(x: buddyX, y: buddyY)
+        }
+    }
+
+    /// Converts a macOS screen point (AppKit, bottom-left origin) to SwiftUI
+    /// coordinates (top-left origin) relative to this screen's overlay window.
+    private func convertScreenPointToSwiftUICoordinates(_ screenPoint: CGPoint) -> CGPoint {
+        let x = screenPoint.x - screenFrame.origin.x
+        let y = (screenFrame.origin.y + screenFrame.height) - screenPoint.y
+        return CGPoint(x: x, y: y)
+    }
+
+    // MARK: - Element Navigation
+
+    /// Starts animating the buddy toward a detected UI element location.
+    private func startNavigatingToElement(screenLocation: CGPoint) {
+        // Don't interrupt welcome animation
+        guard !showWelcome || welcomeText.isEmpty else { return }
+
