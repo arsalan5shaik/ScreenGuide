@@ -381,3 +381,62 @@ final class CompanionManager: ObservableObject {
                     UserDefaults.standard.set(true, forKey: "hasScreenContentPermission")
                     ScreenGuideAnalytics.trackPermissionGranted(permission: "screen_content")
 
+                    // If onboarding was already completed, show the cursor overlay now
+                    if hasCompletedOnboarding && allPermissionsGranted && !isOverlayVisible && isScreenGuideCursorEnabled {
+                        overlayWindowManager.hasShownOverlayBefore = true
+                        overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+                        isOverlayVisible = true
+                    }
+                }
+            } catch {
+                print("⚠️ Screen content permission request failed: \(error)")
+                await MainActor.run { isRequestingScreenContent = false }
+            }
+        }
+    }
+
+    // MARK: - Private
+
+    /// Triggers the system microphone prompt if the user has never been asked.
+    /// Once granted/denied the status sticks and polling picks it up.
+    private func promptForMicrophoneIfNotDetermined() {
+        guard AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined else { return }
+        AVCaptureDevice.requestAccess(for: .audio) { [weak self] granted in
+            Task { @MainActor [weak self] in
+                self?.hasMicrophonePermission = granted
+            }
+        }
+    }
+
+    /// Polls all permissions frequently so the UI updates live after the
+    /// user grants them in System Settings. Screen Recording is the exception —
+    /// macOS requires an app restart for that one to take effect.
+    private func startPermissionPolling() {
+        accessibilityCheckTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshAllPermissions()
+            }
+        }
+    }
+
+    private func bindAudioPowerLevel() {
+        audioPowerCancellable = buddyDictationManager.$currentAudioPowerLevel
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] powerLevel in
+                self?.currentAudioPowerLevel = powerLevel
+            }
+    }
+
+    private func bindVoiceStateObservation() {
+        voiceStateCancellable = buddyDictationManager.$isRecordingFromKeyboardShortcut
+            .combineLatest(
+                buddyDictationManager.$isFinalizingTranscript,
+                buddyDictationManager.$isPreparingToRecord
+            )
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] isRecording, isFinalizing, isPreparing in
+                guard let self else { return }
+                // Don't override .responding — the AI response pipeline
+                // manages that state directly until streaming finishes.
+                guard self.voiceState != .responding else { return }
+
