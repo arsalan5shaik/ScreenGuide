@@ -270,3 +270,55 @@ private final class AssemblyAIStreamingTranscriptionSession: NSObject, BuddyStre
         }
     }
 
+    private func handleTurnMessage(_ turnMessage: TurnMessage) {
+        let transcriptText = turnMessage.transcript?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        stateQueue.async {
+            let turnOrder = turnMessage.turn_order
+                ?? self.activeTurnOrder
+                ?? ((self.storedTurnTranscriptsByOrder.keys.max() ?? -1) + 1)
+
+            if turnMessage.end_of_turn == true || turnMessage.turn_is_formatted == true {
+                self.activeTurnOrder = nil
+                self.activeTurnTranscriptText = ""
+                self.storeTurnTranscript(
+                    transcriptText,
+                    forTurnOrder: turnOrder,
+                    isFormatted: turnMessage.turn_is_formatted == true
+                )
+            } else {
+                self.activeTurnOrder = turnOrder
+                self.activeTurnTranscriptText = transcriptText
+            }
+
+            let fullTranscriptText = self.composeFullTranscript()
+            self.latestTranscriptText = fullTranscriptText
+
+            if !fullTranscriptText.isEmpty {
+                self.onTranscriptUpdate(fullTranscriptText)
+            }
+
+            guard self.isAwaitingExplicitFinalTranscript else { return }
+
+            if turnMessage.end_of_turn == true || turnMessage.turn_is_formatted == true {
+                self.explicitFinalTranscriptDeadlineWorkItem?.cancel()
+                self.explicitFinalTranscriptDeadlineWorkItem = nil
+                self.deliverFinalTranscriptIfNeeded(self.bestAvailableTranscriptText())
+            }
+        }
+    }
+
+    private func storeTurnTranscript(
+        _ transcriptText: String,
+        forTurnOrder turnOrder: Int,
+        isFormatted: Bool
+    ) {
+        guard !transcriptText.isEmpty else { return }
+
+        if let existingTurnTranscript = storedTurnTranscriptsByOrder[turnOrder] {
+            if existingTurnTranscript.isFormatted && !isFormatted {
+                return
+            }
+        }
+
