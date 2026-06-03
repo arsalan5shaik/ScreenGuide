@@ -848,3 +848,63 @@ class CompanionManager(QObject):
             if display_buf:
                 self.sig_response_chunk.emit(ANY_TAG_RE.sub("", display_buf))
 
+            # 6. Update per-app history
+            history.append(Message(role="user", content=transcript))
+            history.append(Message(role="assistant", content=full_response))
+            self._app_memory[ak] = history[-20:]
+
+            # Multistep: parse numbered steps for later "next" invocations
+            if multistep and not self._lesson_steps:
+                steps = _split_steps(full_response)
+                if len(steps) > 1:
+                    self._lesson_steps = steps
+                    self._lesson_step_idx = 0
+
+            clean = ANY_TAG_RE.sub("", full_response).strip()
+            self.sig_response_done.emit(clean)
+            self._last_response = clean   # for "say it again"
+
+            # Log to knowledge journal (skipped in quiz mode — those Q&As aren't
+            # study material)
+            if self._journal_enabled and not self._quiz_mode:
+                try:
+                    journal.log_qa(
+                        question=transcript, answer=clean,
+                        app_key=ak, window_title=title,
+                        provider=cfg.llm_provider(),
+                        model=self._current_model or "",
+                    )
+                except Exception:
+                    pass
+
+            # Lesson recorder gets the Q&A in transcript.md
+            if self._recorder and self._recorder.is_recording:
+                self._recorder.log_question(transcript)
+                self._recorder.log_answer(clean)
+
+            # Live-collab broadcast
+            if self._collab and self._collab.code:
+                try:
+                    await self._collab.send({
+                        "type": "qa", "q": transcript, "a": clean,
+                    })
+                except Exception:
+                    pass
+
+            # 7. TTS — hold the point visible while we speak. Switch voice
+            # to match the user's language for multilingual mode.
+            if self._cancel_flag:
+                return
+            if self._multilang and lang_code != "en":
+                try:
+                    tts = self._get_tts()
+                    if hasattr(tts, "set_voice"):
+                        tts.set_voice(multilang.voice_for(lang_code))
+                except Exception:
+                    pass
+            self._emit_state(AppState.SPEAKING)
+            try:
+                await self._play_lesson(full_response, clean)
+            except asyncio.CancelledError:
+                pass
+
