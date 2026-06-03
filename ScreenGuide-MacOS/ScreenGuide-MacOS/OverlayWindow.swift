@@ -457,3 +457,58 @@ struct BlueCursorView: View {
         // Don't interrupt welcome animation
         guard !showWelcome || welcomeText.isEmpty else { return }
 
+        // Convert the AppKit screen location to SwiftUI coordinates for this screen
+        let targetInSwiftUI = convertScreenPointToSwiftUICoordinates(screenLocation)
+
+        // Offset the target so the buddy sits beside the element rather than
+        // directly on top of it — 8px to the right, 12px below.
+        let offsetTarget = CGPoint(
+            x: targetInSwiftUI.x + 8,
+            y: targetInSwiftUI.y + 12
+        )
+
+        // Clamp target to screen bounds with padding
+        let clampedTarget = CGPoint(
+            x: max(20, min(offsetTarget.x, screenFrame.width - 20)),
+            y: max(20, min(offsetTarget.y, screenFrame.height - 20))
+        )
+
+        // Record the current cursor position so we can detect if the user
+        // moves the mouse enough to cancel the return flight
+        let mouseLocation = NSEvent.mouseLocation
+        cursorPositionWhenNavigationStarted = convertScreenPointToSwiftUICoordinates(mouseLocation)
+
+        // Enter navigation mode — stop cursor following
+        buddyNavigationMode = .navigatingToTarget
+        isReturningToCursor = false
+
+        animateBezierFlightArc(to: clampedTarget) {
+            guard self.buddyNavigationMode == .navigatingToTarget else { return }
+            self.startPointingAtElement()
+        }
+    }
+
+    /// Animates the buddy along a quadratic bezier arc from its current position
+    /// to the specified destination. The triangle rotates to face its direction
+    /// of travel (tangent to the curve) each frame, scales up at the midpoint
+    /// for a "swooping" feel, and the glow intensifies during flight.
+    private func animateBezierFlightArc(
+        to destination: CGPoint,
+        onComplete: @escaping () -> Void
+    ) {
+        navigationAnimationTimer?.invalidate()
+
+        let startPosition = cursorPosition
+        let endPosition = destination
+
+        let deltaX = endPosition.x - startPosition.x
+        let deltaY = endPosition.y - startPosition.y
+        let distance = hypot(deltaX, deltaY)
+
+        // Flight duration scales with distance: short hops are quick, long
+        // flights are more dramatic. Clamped to 0.6s–1.4s.
+        let flightDurationSeconds = min(max(distance / 800.0, 0.6), 1.4)
+        let frameInterval: Double = 1.0 / 60.0
+        let totalFrames = Int(flightDurationSeconds / frameInterval)
+        var currentFrame = 0
+
