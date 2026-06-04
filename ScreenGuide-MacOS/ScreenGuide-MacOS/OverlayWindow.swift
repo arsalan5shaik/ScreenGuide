@@ -512,3 +512,58 @@ struct BlueCursorView: View {
         let totalFrames = Int(flightDurationSeconds / frameInterval)
         var currentFrame = 0
 
+        // Control point for the quadratic bezier arc. Offset the midpoint
+        // upward (negative Y in SwiftUI) so the buddy flies in a parabolic arc.
+        let midPoint = CGPoint(
+            x: (startPosition.x + endPosition.x) / 2.0,
+            y: (startPosition.y + endPosition.y) / 2.0
+        )
+        let arcHeight = min(distance * 0.2, 80.0)
+        let controlPoint = CGPoint(x: midPoint.x, y: midPoint.y - arcHeight)
+
+        navigationAnimationTimer = Timer.scheduledTimer(withTimeInterval: frameInterval, repeats: true) { _ in
+            currentFrame += 1
+
+            if currentFrame > totalFrames {
+                self.navigationAnimationTimer?.invalidate()
+                self.navigationAnimationTimer = nil
+                self.cursorPosition = endPosition
+                self.buddyFlightScale = 1.0
+                onComplete()
+                return
+            }
+
+            // Linear progress 0→1 over the flight duration
+            let linearProgress = Double(currentFrame) / Double(totalFrames)
+
+            // Smoothstep easeInOut: 3t² - 2t³ (Hermite interpolation)
+            let t = linearProgress * linearProgress * (3.0 - 2.0 * linearProgress)
+
+            // Quadratic bezier: B(t) = (1-t)²·P0 + 2(1-t)t·P1 + t²·P2
+            let oneMinusT = 1.0 - t
+            let bezierX = oneMinusT * oneMinusT * startPosition.x
+                        + 2.0 * oneMinusT * t * controlPoint.x
+                        + t * t * endPosition.x
+            let bezierY = oneMinusT * oneMinusT * startPosition.y
+                        + 2.0 * oneMinusT * t * controlPoint.y
+                        + t * t * endPosition.y
+
+            self.cursorPosition = CGPoint(x: bezierX, y: bezierY)
+
+            // Rotation: face the direction of travel by computing the tangent
+            // to the bezier curve. B'(t) = 2(1-t)(P1-P0) + 2t(P2-P1)
+            let tangentX = 2.0 * oneMinusT * (controlPoint.x - startPosition.x)
+                         + 2.0 * t * (endPosition.x - controlPoint.x)
+            let tangentY = 2.0 * oneMinusT * (controlPoint.y - startPosition.y)
+                         + 2.0 * t * (endPosition.y - controlPoint.y)
+            // +90° offset because the triangle's "tip" points up at 0° rotation,
+            // and atan2 returns 0° for rightward movement
+            self.triangleRotationDegrees = atan2(tangentY, tangentX) * (180.0 / .pi) + 90.0
+
+            // Scale pulse: sin curve peaks at midpoint of the flight.
+            // Buddy grows to ~1.3x at the apex, then shrinks back to 1.0x on landing.
+            let scalePulse = sin(linearProgress * .pi)
+            self.buddyFlightScale = 1.0 + scalePulse * 0.3
+        }
+    }
+
