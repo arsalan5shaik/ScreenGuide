@@ -555,3 +555,79 @@ class CursorOverlay(QWidget):
                 continue
             u = min(1.0, u)
 
+            alpha = 1.0
+            ttl = ann.get("ttl")
+            if ttl is not None:
+                age = now - ann["start"]
+                if age > ttl:
+                    continue         # expired — drop
+                if age > ttl * 0.75:
+                    alpha = max(0.0, 1.0 - (age - ttl * 0.75) / (ttl * 0.25))
+            keep.append(ann)
+
+            col = QColor(ANNOT_COLORS.get(ann.get("color", "blue"), CURSOR_BLUE))
+            col.setAlpha(int(235 * alpha))
+            kind = ann["kind"]
+            try:
+                if kind in ("line", "arrow"):
+                    self._paint_stroke_path(p, ann["pts"], False, u, col,
+                                            arrow=(kind == "arrow"))
+                elif kind == "poly":
+                    self._paint_stroke_path(p, ann["pts"], True, u, col)
+                elif kind == "rect":
+                    x1, y1, x2, y2 = ann["x1"], ann["y1"], ann["x2"], ann["y2"]
+                    pts = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
+                    self._paint_stroke_path(p, pts, True, u, col)
+                elif kind == "circle":
+                    self._paint_circle(p, ann, u, col, alpha)
+                elif kind == "underline":
+                    pts = [(ann["x"], ann["y"]), (ann["x"] + ann["w"], ann["y"])]
+                    self._paint_stroke_path(p, pts, False, u, col)
+                elif kind == "angle":
+                    self._paint_angle(p, ann, u, col)
+                elif kind == "text":
+                    self._paint_text(p, ann, u, col, alpha)
+            except Exception:
+                continue   # a malformed shape must never break the paint loop
+        self._annotations = keep
+
+    def _pens(self, col, width=4.0):
+        """(under, main) pen pair — dark under-stroke keeps lines readable
+        over light content, like a marker outline."""
+        under_col = QColor(0, 0, 0)
+        under_col.setAlpha(min(110, col.alpha()))
+        under = QPen(under_col, width + 2.5)
+        under.setCapStyle(Qt.PenCapStyle.RoundCap)
+        under.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        main = QPen(col, width)
+        main.setCapStyle(Qt.PenCapStyle.RoundCap)
+        main.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        return under, main
+
+    def _paint_stroke_path(self, p, pts, closed, u, col, arrow=False, width=4.0):
+        """Draw the first u-fraction of a polyline (progressive stroke)."""
+        pts = [(x - self.x(), y - self.y()) for (x, y) in pts]
+        drawn = _partial_pts(pts, closed, u)
+        if len(drawn) < 2:
+            return
+        if closed and len(pts) >= 3:
+            pts = pts + [pts[0]]
+        path = QPainterPath(QPointF(*drawn[0]))
+        for pt in drawn[1:]:
+            path.lineTo(QPointF(*pt))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        for pen in self._pens(col, width):
+            p.setPen(pen)
+            p.drawPath(path)
+        # Arrowhead appears once the line is fully drawn
+        if arrow and u >= 1.0 and len(pts) >= 2:
+            (x1, y1), (x2, y2) = pts[-2], pts[-1]
+            ang = math.atan2(y2 - y1, x2 - x1)
+            head = 15
+            for pen in self._pens(col, width):
+                p.setPen(pen)
+                for sign in (-1, 1):
+                    ax = x2 - head * math.cos(ang + sign * math.radians(28))
+                    ay = y2 - head * math.sin(ang + sign * math.radians(28))
+                    p.drawLine(QPointF(x2, y2), QPointF(ax, ay))
+
