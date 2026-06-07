@@ -274,3 +274,59 @@ class TrayManager(QObject):
         diag = setup_menu.addAction("Save diagnostics report…")
         diag.triggered.connect(self.on_diagnostics)
 
+        menu.addSeparator()
+
+        quit_action = menu.addAction("Quit ScreenGuide")
+        quit_action.triggered.connect(self.on_quit)
+
+        self._tray.setContextMenu(menu)
+        # Keep refs to prevent GC
+        self._menu = menu
+
+    def hide_icon(self):
+        """Remove the tray icon from the notification area. MUST run before
+        app.quit(): killing the process without Shell_NotifyIcon(NIM_DELETE)
+        leaves a ghost icon in the tray until hovered."""
+        try:
+            self._tray.hide()
+        except Exception:
+            pass
+
+    def _prompt_custom_instructions(self):
+        dlg = QDialog(None)
+        dlg.setWindowTitle("Instructions for ScreenGuide")
+        dlg.setMinimumSize(480, 380)
+        dlg.setStyleSheet("""
+            QDialog { background-color: #1e1e24; }
+            QLabel { color: #e8e8ec; font-size: 13px; }
+            QTextEdit {
+                background-color: #26262e; color: #f0f0f4;
+                border: 1px solid #3a3a44; border-radius: 8px;
+                padding: 10px; font-size: 13px;
+            }
+            QTextEdit:focus { border: 1px solid #7c5cff; }
+            QPushButton {
+                background-color: #3a3a44; color: #f0f0f4;
+                border: none; border-radius: 6px; padding: 8px 18px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background-color: #47475400; }
+            QPushButton#primary { background-color: #7c5cff; }
+            QPushButton#primary:hover { background-color: #8f72ff; }
+        """)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(20, 20, 20, 16)
+        layout.setSpacing(10)
+
+        title = QLabel("Instructions for ScreenGuide")
+        title.setStyleSheet("font-size: 15px; font-weight: 600; color: #ffffff;")
+        layout.addWidget(title)
+
+        subtitle = QLabel(
+            "Replaces ScreenGuide's core behavior (name, rules, tone).\n"
+            "{{CONTEXT}} and {{TODAY}} are placeholders — best left in."
+        )
+        subtitle.setStyleSheet("color: #9a9aa4; font-size: 12px;")
+        layout.addWidget(subtitle)
+
