@@ -908,3 +908,55 @@ class CompanionManager(QObject):
             except asyncio.CancelledError:
                 pass
 
+        except Exception as e:
+            self.sig_error.emit(str(e))
+
+        finally:
+            if pointing_held:
+                self.sig_point_release.emit()
+            self._emit_state(AppState.IDLE)
+
+    async def _reply_local(self, msg: str):
+        """Show + speak a message that doesn't need an LLM round-trip."""
+        self.sig_response_chunk.emit(msg)
+        self.sig_response_done.emit(msg)
+        self._last_response = msg
+        self._emit_state(AppState.SPEAKING)
+        try:
+            await self._get_tts().speak(msg)
+        except Exception:
+            pass
+        self._emit_state(AppState.IDLE)
+
+    async def _spaced_review(self):
+        """SR-style review: pick due entries from the journal, ask one back."""
+        due = journal.due_for_review(limit=1)
+        if not due:
+            await self._reply_local(
+                "Nothing due for review right now — keep learning, I'll quiz "
+                "you in a few days."
+            )
+            return
+        entry = due[0]
+        msg = f"Review: {entry['question']}"
+        # Mark "correct" optimistically — a real implementation would wait for
+        # the user's answer and grade it. Stubbed: reschedule based on streak.
+        try:
+            journal.mark_reviewed(int(entry["id"]), correct=True)
+        except Exception:
+            pass
+        await self._reply_local(msg)
+
+    async def _advance_lesson_step(self, ak: str):
+        """User said 'next' — re-render the stored next lesson step via TTS,
+        no new LLM round-trip needed."""
+        self._lesson_step_idx += 1
+        if self._lesson_step_idx >= len(self._lesson_steps):
+            msg = "That's the last step — you're done!"
+            self._lesson_steps = []
+            self._lesson_step_idx = 0
+        else:
+            step = self._lesson_steps[self._lesson_step_idx]
+            total = len(self._lesson_steps)
+            msg = f"Step {self._lesson_step_idx + 1} of {total}: {step}"
+
