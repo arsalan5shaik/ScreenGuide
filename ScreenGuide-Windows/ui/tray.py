@@ -330,3 +330,55 @@ class TrayManager(QObject):
         subtitle.setStyleSheet("color: #9a9aa4; font-size: 12px;")
         layout.addWidget(subtitle)
 
+        editor = QTextEdit()
+        editor.setPlainText(self._custom_instructions)
+        editor.setPlaceholderText("e.g. \"Your name is Max, a laid-back coding buddy…\"")
+        layout.addWidget(editor, stretch=1)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(dlg.reject)
+        ok_btn = QPushButton("Save")
+        ok_btn.setObjectName("primary")
+        ok_btn.clicked.connect(dlg.accept)
+        btn_row.addWidget(cancel_btn)
+        btn_row.addWidget(ok_btn)
+        layout.addLayout(btn_row)
+
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            self._custom_instructions = editor.toPlainText().strip()
+            self.on_set_custom_instructions.emit(self._custom_instructions)
+
+    def _build_language_submenu(self, parent_menu: QMenu):
+        """Lets the user pin ScreenGuide's reply language instead of relying on
+        (sometimes unreliable) auto-detect from the transcript."""
+        from tutor_features.multilang import _LANG_VOICE
+
+        current = getattr(self, "_response_language", "")
+        lang_menu = parent_menu.addMenu(
+            f"Reply language: {_LANG_VOICE.get(current, ('Auto-detect',))[0] if current else 'Auto-detect'}"
+        )
+
+        auto_act = lang_menu.addAction("Auto-detect")
+        auto_act.setCheckable(True)
+        auto_act.setChecked(current == "")
+        auto_act.triggered.connect(lambda: self.on_set_response_language.emit(""))
+
+        lang_menu.addSeparator()
+        for code, (name, _voice) in _LANG_VOICE.items():
+            act = lang_menu.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(current == code)
+            act.triggered.connect(lambda checked, c=code: self.on_set_response_language.emit(c))
+
+    def _build_mic_submenu(self, parent_menu: QMenu):
+        """Lists available input devices so the user can pick a mic without
+        digging through Windows sound settings."""
+        try:
+            import sounddevice as sd
+            devices = sd.query_devices()
+            default_idx = sd.default.device[0]
+        except Exception:
+            return  # sounddevice not ready yet — skip silently, not fatal
+
