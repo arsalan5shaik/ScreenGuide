@@ -319,3 +319,44 @@ class SetupWizard(QDialog):
         self.status.setText(status)
         self.progress.setValue(int(pct))
 
+    def _on_finished(self, ok: bool, msg: str):
+        if not ok:
+            self.status.setText(f"⚠️ {msg}")
+            self.action_btn.setEnabled(True)
+            self.skip_btn.setEnabled(True)
+            self.action_btn.setText("Try again")
+            return
+
+        s = self._step
+        if s == "installing":
+            self._goto_next_model_step()
+        elif s == "pulling_text":
+            self._set_step("vision_model")
+        elif s == "pulling_vision":
+            self._set_step("done")
+
+    def _goto_next_model_step(self):
+        # If text model already there, jump straight to vision step.
+        if not ob.is_model_installed(cfg.ollama_text_model):
+            self._set_step("text_model")
+        elif not ob.is_model_installed(cfg.ollama_vision_model):
+            self._set_step("vision_model")
+        else:
+            self._set_step("done")
+
+
+def maybe_show_setup_wizard(parent=None) -> SetupWizard | None:
+    """Open the wizard only if it hasn't run before AND something is missing."""
+    if setup_already_ran():
+        return None
+    if (
+        ob.is_ollama_running()
+        and ob.is_model_installed(cfg.ollama_text_model)
+    ):
+        # Everything is already wired up — don't pester the user.
+        mark_setup_complete()
+        return None
+
+    w = SetupWizard(parent)
+    w.show()
+    return w
