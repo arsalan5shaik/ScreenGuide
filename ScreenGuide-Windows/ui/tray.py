@@ -382,3 +382,53 @@ class TrayManager(QObject):
         except Exception:
             return  # sounddevice not ready yet — skip silently, not fatal
 
+        mic_menu = parent_menu.addMenu("Microphone")
+        for idx, dev in enumerate(devices):
+            if dev.get("max_input_channels", 0) <= 0:
+                continue
+            label = dev["name"]
+            if idx == default_idx:
+                label += "  (system default)"
+            act = mic_menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(idx == getattr(self, "_active_mic_index", default_idx))
+            act.triggered.connect(lambda checked, i=idx: self.on_set_mic_device.emit(i))
+
+    def _build_ollama_submenu(self, parent_menu: QMenu, providers: dict):
+        """Vision/Text model pickers + 'Pull recommended' for Ollama."""
+        from ai.ollama_models_registry import (
+            RECOMMENDED_VISION, RECOMMENDED_TEXT,
+        )
+
+        ol_menu = parent_menu.addMenu("Ollama")
+        active_vision = providers.get("ollama_vision_model", "")
+        active_text   = providers.get("ollama_text_model", "")
+
+        # ─ Vision model picker ─
+        v_menu = ol_menu.addMenu(f"Vision model: {active_vision or '(none)'}")
+        installed_vision = self._ollama_installed.get("vision", [])
+        if installed_vision:
+            for name in installed_vision:
+                label = f"● {name}" if name == active_vision else f"  {name}"
+                act = v_menu.addAction(label)
+                act.triggered.connect(
+                    lambda _=False, n=name: self.on_ollama_set_model.emit("vision", n)
+                )
+        else:
+            empty = v_menu.addAction("(no vision models installed)")
+            empty.setEnabled(False)
+
+        # ─ Text model picker ─
+        t_menu = ol_menu.addMenu(f"Text model: {active_text or '(none)'}")
+        installed_text = self._ollama_installed.get("text", [])
+        if installed_text:
+            for name in installed_text:
+                label = f"● {name}" if name == active_text else f"  {name}"
+                act = t_menu.addAction(label)
+                act.triggered.connect(
+                    lambda _=False, n=name: self.on_ollama_set_model.emit("text", n)
+                )
+        else:
+            empty = t_menu.addAction("(no text models installed)")
+            empty.setEnabled(False)
+
