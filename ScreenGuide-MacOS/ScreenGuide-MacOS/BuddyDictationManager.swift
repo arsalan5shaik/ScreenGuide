@@ -593,3 +593,59 @@ final class BuddyDictationManager: NSObject, ObservableObject {
             currentDraftCallbacks?.updateDraftText(finalDraftText)
         }
 
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        activeTranscriptionSession?.cancel()
+
+        resetSessionState()
+
+        guard shouldSubmitFinalDraft else { return }
+        guard !finalTranscriptText.isEmpty else { return }
+
+        currentDraftCallbacks?.submitDraftText(finalDraftText)
+    }
+
+    private func composeDraftText(withTranscribedText transcribedText: String) -> String {
+        let trimmedTranscriptText = transcribedText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedTranscriptText.isEmpty else {
+            return draftTextBeforeCurrentDictation
+        }
+
+        let trimmedExistingDraftText = draftTextBeforeCurrentDictation
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedExistingDraftText.isEmpty else {
+            return trimmedTranscriptText
+        }
+
+        if draftTextBeforeCurrentDictation.hasSuffix(" ") || draftTextBeforeCurrentDictation.hasSuffix("\n") {
+            return draftTextBeforeCurrentDictation + trimmedTranscriptText
+        }
+
+        return draftTextBeforeCurrentDictation + " " + trimmedTranscriptText
+    }
+
+    private func resetSessionState() {
+        pendingStartRequestIdentifier = UUID()
+        activeTranscriptionSession = nil
+        draftCallbacks = nil
+        activeStartSource = nil
+        draftTextBeforeCurrentDictation = ""
+        latestRecognizedText = ""
+        shouldAutomaticallySubmitFinalDraft = false
+        hasFinishedCurrentDictationSession = false
+        isPreparingToRecord = false
+        isRecordingFromMicrophoneButton = false
+        isRecordingFromKeyboardShortcut = false
+        isKeyboardShortcutSessionActiveOrFinalizing = false
+        isFinalizingTranscript = false
+        currentAudioPowerLevel = 0
+        recordedAudioPowerHistory = Array(
+            repeating: Self.recordedAudioPowerHistoryBaselineLevel,
+            count: Self.recordedAudioPowerHistoryLength
+        )
+        microphoneButtonRecordingStartedAt = nil
+        lastRecordedAudioPowerSampleDate = .distantPast
+    }
+
