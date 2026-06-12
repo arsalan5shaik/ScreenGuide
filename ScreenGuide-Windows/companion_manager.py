@@ -960,3 +960,57 @@ class CompanionManager(QObject):
             total = len(self._lesson_steps)
             msg = f"Step {self._lesson_step_idx + 1} of {total}: {step}"
 
+        self.sig_response_chunk.emit(msg)
+        self.sig_response_done.emit(msg)
+        self._emit_state(AppState.SPEAKING)
+        try:
+            await self._get_tts().speak(msg)
+        except Exception:
+            pass
+        self._emit_state(AppState.IDLE)
+
+    # ── Coordinate mapping ────────────────────────────────────────────────────
+    #
+    # The LLM emits NORMALIZED 0-1000 coordinates relative to the screenshot
+    # it saw. The overlay draws in LOGICAL screen pixels. These helpers convert
+    # between the two using the ScreenShot metadata captured this turn.
+
+    def _shot(self, screen_idx: int = 1):
+        for s in self._screens_ctx:
+            if s.index == screen_idx:
+                return s
+        return self._screens_ctx[0] if self._screens_ctx else None
+
+    def _denorm(self, nx: float, ny: float, screen_idx: int = 1):
+        """Normalized 0-1000 (screenshot space) → logical screen pixels."""
+        shot = self._shot(screen_idx)
+        if shot is None:
+            return float(nx), float(ny)
+        log_w = shot.physical_width / shot.dpi_scale
+        log_h = shot.physical_height / shot.dpi_scale
+        # Legacy safety: values beyond 1000 are raw pixels in the downscaled
+        # JPEG the model saw — scale by the JPEG dimensions instead.
+        bx = 1000.0 if (nx <= 1000 and ny <= 1000) else float(max(shot.width, 1))
+        by = 1000.0 if (nx <= 1000 and ny <= 1000) else float(max(shot.height, 1))
+        x = shot.logical_left + (nx / bx) * log_w
+        y = shot.logical_top + (ny / by) * log_h
+        return x, y
+
+    def _denorm_len(self, n: float, screen_idx: int = 1) -> float:
+        """Normalized length (0-1000 x-units) → logical pixels."""
+        shot = self._shot(screen_idx)
+        if shot is None:
+            return float(n)
+        return (n / 1000.0) * (shot.physical_width / shot.dpi_scale)
+
+    def _norm(self, x: float, y: float, screen_idx: int = 1):
+        """Logical screen pixels → normalized 0-1000 (for prompt injection)."""
+        shot = self._shot(screen_idx)
+        if shot is None:
+            return int(x), int(y)
+        log_w = shot.physical_width / shot.dpi_scale
+        log_h = shot.physical_height / shot.dpi_scale
+        nx = (x - shot.logical_left) / max(log_w, 1) * 1000
+        ny = (y - shot.logical_top) / max(log_h, 1) * 1000
+        return int(round(nx)), int(round(ny))
+
