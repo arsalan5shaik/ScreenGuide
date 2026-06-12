@@ -322,3 +322,54 @@ private final class AssemblyAIStreamingTranscriptionSession: NSObject, BuddyStre
             }
         }
 
+        storedTurnTranscriptsByOrder[turnOrder] = StoredTurnTranscript(
+            transcriptText: transcriptText,
+            isFormatted: isFormatted
+        )
+    }
+
+    private func composeFullTranscript() -> String {
+        let committedTranscriptSegments = storedTurnTranscriptsByOrder
+            .sorted(by: { $0.key < $1.key })
+            .map(\.value.transcriptText)
+            .filter { !$0.isEmpty }
+
+        var transcriptSegments = committedTranscriptSegments
+
+        let trimmedActiveTurnTranscriptText = activeTurnTranscriptText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !trimmedActiveTurnTranscriptText.isEmpty {
+            transcriptSegments.append(trimmedActiveTurnTranscriptText)
+        }
+
+        return transcriptSegments.joined(separator: " ")
+    }
+
+    private func scheduleExplicitFinalTranscriptDeadline() {
+        explicitFinalTranscriptDeadlineWorkItem?.cancel()
+
+        let deadlineWorkItem = DispatchWorkItem { [weak self] in
+            self?.stateQueue.async {
+                guard let self else { return }
+                self.deliverFinalTranscriptIfNeeded(self.bestAvailableTranscriptText())
+            }
+        }
+
+        explicitFinalTranscriptDeadlineWorkItem = deadlineWorkItem
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.explicitFinalTranscriptGracePeriodSeconds,
+            execute: deadlineWorkItem
+        )
+    }
+
+    private func deliverFinalTranscriptIfNeeded(_ transcriptText: String) {
+        guard !hasDeliveredFinalTranscript else { return }
+        hasDeliveredFinalTranscript = true
+        explicitFinalTranscriptDeadlineWorkItem?.cancel()
+        explicitFinalTranscriptDeadlineWorkItem = nil
+        onFinalTranscriptReady(transcriptText)
+        sendJSONMessage(["type": "Terminate"])
+    }
+
