@@ -567,3 +567,57 @@ struct BlueCursorView: View {
         }
     }
 
+    /// Transitions to pointing mode — shows a speech bubble with a bouncy
+    /// scale-in entrance and variable-speed character streaming.
+    private func startPointingAtElement() {
+        buddyNavigationMode = .pointingAtTarget
+
+        // Rotate back to default pointer angle now that we've arrived
+        triangleRotationDegrees = -35.0
+
+        // Reset navigation bubble state — start small for the scale-bounce entrance
+        navigationBubbleText = ""
+        navigationBubbleOpacity = 1.0
+        navigationBubbleSize = .zero
+        navigationBubbleScale = 0.5
+
+        // Use custom bubble text from the companion manager (e.g. onboarding demo)
+        // if available, otherwise fall back to a random pointer phrase
+        let pointerPhrase = companionManager.detectedElementBubbleText
+            ?? navigationPointerPhrases.randomElement()
+            ?? "right here!"
+
+        streamNavigationBubbleCharacter(phrase: pointerPhrase, characterIndex: 0) {
+            // All characters streamed — hold for 3 seconds, then fly back
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+                guard self.buddyNavigationMode == .pointingAtTarget else { return }
+                self.navigationBubbleOpacity = 0.0
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    guard self.buddyNavigationMode == .pointingAtTarget else { return }
+                    self.startFlyingBackToCursor()
+                }
+            }
+        }
+    }
+
+    /// Streams the navigation bubble text one character at a time with variable
+    /// delays (30–60ms) for a natural "speaking" rhythm.
+    private func streamNavigationBubbleCharacter(
+        phrase: String,
+        characterIndex: Int,
+        onComplete: @escaping () -> Void
+    ) {
+        guard buddyNavigationMode == .pointingAtTarget else { return }
+        guard characterIndex < phrase.count else {
+            onComplete()
+            return
+        }
+
+        let charIndex = phrase.index(phrase.startIndex, offsetBy: characterIndex)
+        navigationBubbleText.append(phrase[charIndex])
+
+        // On the first character, trigger the scale-bounce entrance
+        if characterIndex == 0 {
+            navigationBubbleScale = 1.0
+        }
+
