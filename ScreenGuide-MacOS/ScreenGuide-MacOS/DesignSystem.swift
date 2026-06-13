@@ -210,3 +210,53 @@ enum DS {
         static let pill: CGFloat = .infinity
     }
 
+    // MARK: - Animation Durations
+
+    enum Animation {
+        /// Quick state changes — hover in/out, press feedback.
+        static let fast: Double = 0.15
+        /// Standard transitions — content reveal, button state changes.
+        static let normal: Double = 0.25
+        /// Slower, more dramatic — fade-ins, celebration screen elements.
+        static let slow: Double = 0.4
+    }
+
+    // MARK: - State Layer Opacities
+    // Based on Material Design 3's state layer system.
+    // A "state layer" overlays the button's content color at these opacities.
+
+    enum StateLayer {
+        /// Hover: subtle highlight to indicate interactivity.
+        static let hover: Double = 0.08
+        /// Focus: keyboard navigation indicator (slightly stronger than hover).
+        static let focus: Double = 0.12
+        /// Pressed: active press feedback (same strength as focus).
+        static let pressed: Double = 0.12
+        /// Dragged: strongest overlay (rarely used).
+        static let dragged: Double = 0.16
+    }
+}
+
+// MARK: - Button Styles
+
+/// Primary button — the main call-to-action per screen.
+/// Accent-colored background with white text. One per view maximum.
+/// Used for: "start"/"resume", "let's go", "continue", "verify completion".
+struct DSPrimaryButtonStyle: ButtonStyle {
+    var isFullWidth: Bool = true
+
+    @State private var isHovered = false
+
+    // Separate state for the scale expansion so it animates on a slower,
+    // more gradual timeline (0.6s) than the background color snap (0.15s).
+    @State private var isHoverScaleExpanded = false
+
+    // Whether the hover glow shadow is active. Builds up gradually (0.6s)
+    // on hover entry, fades out faster (0.3s) on exit.
+    @State private var isHoverGlowActive = false
+
+    // Continuously toggles while hovered to drive a gentle breathing pulse
+    // in the glow shadow. Creates a living, organic feel — like the button
+    // is softly glowing, not just statically lit.
+    @State private var isGlowBreathingIn = false
+
