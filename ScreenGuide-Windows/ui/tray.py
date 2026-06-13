@@ -432,3 +432,59 @@ class TrayManager(QObject):
             empty = t_menu.addAction("(no text models installed)")
             empty.setEnabled(False)
 
+        ol_menu.addSeparator()
+
+        # ─ Pull recommended ─
+        pull_menu = ol_menu.addMenu("Pull recommended…")
+        already = set(installed_vision) | set(installed_text)
+
+        def _add_recs(rec_list, header):
+            hdr = pull_menu.addAction(header)
+            hdr.setEnabled(False)
+            for rec in rec_list:
+                # Mark already-installed entries (matching by tag prefix)
+                installed = any(n == rec.name or n.startswith(rec.name.split(":")[0] + ":") for n in already)
+                tag = "✓ " if installed else "  "
+                label = f"{tag}{rec.label}  ·  {rec.size}  —  {rec.blurb}"
+                act = pull_menu.addAction(label)
+                if installed:
+                    act.setEnabled(False)
+                else:
+                    act.triggered.connect(
+                        lambda _=False, n=rec.name: self.on_ollama_pull.emit(n)
+                    )
+
+        _add_recs(RECOMMENDED_VISION, "── Vision ──")
+        pull_menu.addSeparator()
+        _add_recs(RECOMMENDED_TEXT, "── Text ──")
+
+        ol_menu.addSeparator()
+        refresh_act = ol_menu.addAction("Refresh installed models")
+        refresh_act.triggered.connect(self.on_ollama_refresh)
+
+    def set_ollama_models(self, classified: dict):
+        """Called by the manager after polling /api/tags. Triggers menu rebuild."""
+        self._ollama_installed = {
+            "vision": list(classified.get("vision", [])),
+            "text":   list(classified.get("text", [])),
+        }
+        self.rebuild_menu()
+
+    def _on_activated(self, reason):
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self.on_show_panel.emit()
+
+    def _toggle_search(self, checked: bool):
+        self._search_enabled = checked
+        self._search_action.setText(
+            "Web Search: ON" if checked else "Web Search: OFF"
+        )
+        self.on_toggle_search.emit(checked)
+
+    def _toggle_wake(self, checked: bool):
+        self._wake_enabled = checked
+        self._wake_action.setText(
+            "Wake word 'ScreenGuide': ON" if checked else "Wake word 'ScreenGuide': OFF"
+        )
+        self.on_toggle_wake_word.emit(checked)
+
