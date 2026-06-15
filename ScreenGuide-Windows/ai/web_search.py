@@ -256,3 +256,49 @@ def _normalize_ddg_url(href: str) -> str:
         return href
     return ""
 
+
+# ── Page fetch + text extraction ──────────────────────────────────────────────
+
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style|noscript)\b[^>]*>.*?</\1>",
+                              re.IGNORECASE | re.DOTALL)
+_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"\s+")
+
+
+async def _fetch_text(client: httpx.AsyncClient, url: str) -> str:
+    try:
+        r = await client.get(url)
+        if r.status_code >= 400:
+            return ""
+        ctype = r.headers.get("content-type", "")
+        if "html" not in ctype and "text" not in ctype:
+            return ""
+        return _html_to_text(r.text)
+    except Exception:
+        return ""
+
+
+def _html_to_text(html: str) -> str:
+    html = _SCRIPT_STYLE_RE.sub(" ", html)
+
+    # Prefer <main> or <article> if present; otherwise whole body
+    body_match = re.search(
+        r"<(article|main)\b[^>]*>(.*?)</\1>", html, re.IGNORECASE | re.DOTALL,
+    )
+    if body_match:
+        core = body_match.group(2)
+    else:
+        body_match = re.search(r"<body\b[^>]*>(.*?)</body>",
+                               html, re.IGNORECASE | re.DOTALL)
+        core = body_match.group(1) if body_match else html
+
+    text = _TAG_RE.sub(" ", core)
+    text = unescape(text)
+    text = _WS_RE.sub(" ", text).strip()
+    return text
+
+
+def _truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1] + "…"
