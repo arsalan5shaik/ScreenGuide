@@ -440,3 +440,54 @@ final class CompanionManager: ObservableObject {
                 // manages that state directly until streaming finishes.
                 guard self.voiceState != .responding else { return }
 
+                if isFinalizing {
+                    self.voiceState = .processing
+                } else if isRecording {
+                    self.voiceState = .listening
+                } else if isPreparing {
+                    self.voiceState = .processing
+                } else {
+                    self.voiceState = .idle
+                    // If the user pressed and released the hotkey without
+                    // saying anything, no response task runs — schedule the
+                    // transient hide here so the overlay doesn't get stuck.
+                    // Only do this when no response is in flight, otherwise
+                    // the brief idle gap between recording and processing
+                    // would prematurely hide the overlay.
+                    if self.currentResponseTask == nil {
+                        self.scheduleTransientHideIfNeeded()
+                    }
+                }
+            }
+    }
+
+    private func bindShortcutTransitions() {
+        shortcutTransitionCancellable = globalPushToTalkShortcutMonitor
+            .shortcutTransitionPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] transition in
+                self?.handleShortcutTransition(transition)
+            }
+    }
+
+    private func handleShortcutTransition(_ transition: BuddyPushToTalkShortcut.ShortcutTransition) {
+        switch transition {
+        case .pressed:
+            guard !buddyDictationManager.isDictationInProgress else { return }
+            // Don't register push-to-talk while the onboarding video is playing
+            guard !showOnboardingVideo else { return }
+
+            // Cancel any pending transient hide so the overlay stays visible
+            transientHideTask?.cancel()
+            transientHideTask = nil
+
+            // If the cursor is hidden, bring it back transiently for this interaction
+            if !isScreenGuideCursorEnabled && !isOverlayVisible {
+                overlayWindowManager.hasShownOverlayBefore = true
+                overlayWindowManager.showOverlay(onScreens: NSScreen.screens, companionManager: self)
+                isOverlayVisible = true
+            }
+
+            // Dismiss the menu bar panel so it doesn't cover the screen
+            NotificationCenter.default.post(name: .screenguideDismissPanel, object: nil)
+
