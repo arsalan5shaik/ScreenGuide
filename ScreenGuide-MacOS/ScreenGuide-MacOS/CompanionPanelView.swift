@@ -678,3 +678,64 @@ struct CompanionPanelView: View {
         .pointerCursor()
     }
 
+    // MARK: - Footer
+
+    private var footerSection: some View {
+        HStack {
+            Button(action: {
+                NSApp.terminate(nil)
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "power")
+                        .font(.system(size: 11, weight: .medium))
+                    Text("Quit ScreenGuide")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(DS.Colors.textTertiary)
+            }
+            .buttonStyle(.plain)
+            .pointerCursor()
+
+            if companionManager.hasCompletedOnboarding {
+                Spacer()
+
+                Button(action: {
+                    companionManager.replayOnboarding()
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "play.circle")
+                            .font(.system(size: 11, weight: .medium))
+                        Text("Watch Onboarding Again")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(DS.Colors.textTertiary)
+                }
+                .buttonStyle(.plain)
+                .pointerCursor()
+            }
+        }
+    }
+
+    // MARK: - Visual Helpers
+
+    private var panelBackground: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(DS.Colors.background)
+            .shadow(color: Color.black.opacity(0.5), radius: 20, x: 0, y: 10)
+            .shadow(color: Color.black.opacity(0.3), radius: 4, x: 0, y: 2)
+    }
+
+    private var statusDotColor: Color {
+        if !companionManager.isOverlayVisible {
+            return DS.Colors.textTertiary
+        }
+        switch companionManager.voiceState {
+        case .idle:
+            return DS.Colors.success
+        case .listening:
+            return DS.Colors.blue400
+        case .processing, .responding:
+            return DS.Colors.blue400
+        }
+    }
+
