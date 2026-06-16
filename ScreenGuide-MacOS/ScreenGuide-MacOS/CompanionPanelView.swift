@@ -739,3 +739,23 @@ struct CompanionPanelView: View {
         }
     }
 
+    private var statusText: String {
+        if !companionManager.hasCompletedOnboarding || !companionManager.allPermissionsGranted {
+            return "Setup"
+        }
+        if !companionManager.isOverlayVisible {
+            return "Ready"
+        }
+        switch companionManager.voiceState {
+        case .idle:
+            return "Active"
+        case .listening:
+            return "Listening"
+        case .processing:
+            return "Processing"
+        case .responding:
+            return "Responding"
+        }
+    }
+
+}
