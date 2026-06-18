@@ -373,3 +373,53 @@ private final class AssemblyAIStreamingTranscriptionSession: NSObject, BuddyStre
         sendJSONMessage(["type": "Terminate"])
     }
 
+    private func sendJSONMessage(_ payload: [String: Any]) {
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: payload),
+              let jsonString = String(data: jsonData, encoding: .utf8) else {
+            return
+        }
+
+        sendQueue.async { [weak self] in
+            guard let self, let webSocketTask = self.webSocketTask else { return }
+            webSocketTask.send(.string(jsonString)) { [weak self] error in
+                if let error {
+                    self?.failSession(with: error)
+                }
+            }
+        }
+    }
+
+    private func failSession(with error: Error) {
+        resolveReadyContinuationIfNeeded(with: .failure(error))
+        stateQueue.async {
+            let latestTranscriptText = self.bestAvailableTranscriptText()
+
+            if self.isAwaitingExplicitFinalTranscript
+                && !self.hasDeliveredFinalTranscript
+                && !latestTranscriptText.isEmpty {
+                print("[AssemblyAI] ⚠️ WebSocket error during active session, delivering partial transcript as fallback: \(error.localizedDescription)")
+                self.deliverFinalTranscriptIfNeeded(latestTranscriptText)
+                return
+            }
+            print("[AssemblyAI] ❌ Session failed with error: \(error.localizedDescription)")
+
+            self.onError(error)
+        }
+    }
+
+    private func bestAvailableTranscriptText() -> String {
+        let composedTranscriptText = composeFullTranscript()
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !composedTranscriptText.isEmpty {
+            return composedTranscriptText
+        }
+
+        return latestTranscriptText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func resolveReadyContinuationIfNeeded(with result: Result<Void, Error>) {
+        stateQueue.async {
+            guard !self.hasResolvedReadyContinuation else { return }
+            self.hasResolvedReadyContinuation = true
+
