@@ -488,3 +488,53 @@ class TrayManager(QObject):
         )
         self.on_toggle_wake_word.emit(checked)
 
+    def _toggle_slow(self, checked: bool):
+        self._slow_enabled = checked
+        self._slow_action.setText(
+            "Slow Mode (teacher pace): ON" if checked
+            else "Slow Mode (teacher pace): OFF"
+        )
+        self.on_toggle_slow_mode.emit(checked)
+
+    def _toggle_quiz(self, checked: bool):
+        self._quiz_enabled = checked
+        self._quiz_action.setText(
+            "Quiz Mode: ON" if checked else "Quiz Mode: OFF"
+        )
+        self.on_toggle_quiz_mode.emit(checked)
+
+    def _toggle_privacy(self, checked: bool):
+        self._privacy_enabled = checked
+        self._privacy_action.setText(
+            "Privacy Guard: ON" if checked else "Privacy Guard: OFF"
+        )
+        self.on_toggle_privacy.emit(checked)
+
+    def _toggle_code(self, checked: bool):
+        self._code_enabled = checked
+        self._code_action.setText(
+            "Code Mode (auto): ON" if checked else "Code Mode (auto): OFF"
+        )
+        self.on_toggle_code_mode.emit(checked)
+
+    def _toggle_multilang(self, checked: bool):
+        self._multilang_enabled = checked
+        self._ml_action.setText(
+            "Multilingual: ON" if checked else "Multilingual: OFF"
+        )
+        self.on_toggle_multilang.emit(checked)
+
+    def _toggle_ocr(self, checked: bool):
+        self._ocr_enabled = checked
+        self._ocr_action.setText(
+            "OCR Fallback: ON" if checked else "OCR Fallback: OFF"
+        )
+        self.on_toggle_ocr.emit(checked)
+
+    def _toggle_journal(self, checked: bool):
+        self._journal_enabled = checked
+        self._journal_action.setText(
+            "Logging: ON" if checked else "Logging: OFF"
+        )
+        self.on_toggle_journal.emit(checked)
+
