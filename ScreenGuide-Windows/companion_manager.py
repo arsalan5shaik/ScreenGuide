@@ -1014,3 +1014,63 @@ class CompanionManager(QObject):
         ny = (y - shot.logical_top) / max(log_h, 1) * 1000
         return int(round(nx)), int(round(ny))
 
+    def _resolve_anchor(self, name: str):
+        """Resolve '@element name' → logical bbox via UIA (fast tier only)."""
+        try:
+            from ai.hybrid_pointer import find_target
+            t = find_target(name, skip_ocr=True, skip_vision=True)
+            if t is None:
+                return None
+            shot = self._shot(1)
+            scale = (shot.dpi_scale if shot else 1.0) or 1.0
+            l, tp, r, b = t.bbox
+            return (l / scale, tp / scale, r / scale, b / scale)
+        except Exception:
+            return None
+
+    def _parse_points(self, text: str):
+        """Live-during-stream tags: pointing and board-clear only. Drawing
+        tags are deferred and played back in sync with narration."""
+        for match in POINT_RE.finditer(text):
+            x, y, label, scr = match.groups()
+            lx, ly = self._denorm(float(x), float(y), int(scr))
+            self.sig_point_at.emit(lx, ly, label.strip())
+        if CLEAR_RE.search(text):
+            self.sig_clear_drawings.emit()
+
+    # ── Vertex snapping (figure-detector assisted accuracy) ─────────────────
+
+    def _snap_pt(self, nx: float, ny: float, thresh: float = 35.0):
+        """Snap a normalized point to the nearest detected-figure vertex."""
+        best, bd = None, thresh
+        for fig in self._figures_ctx:
+            for (vx, vy) in fig.vertices:
+                d = math.hypot(nx - vx, ny - vy)
+                if d < bd:
+                    bd, best = d, (float(vx), float(vy))
+        return best if best is not None else (nx, ny)
+
+    def _angle_rot_for_vertex(self, nx: float, ny: float):
+        """Rotation (deg) that puts a right-angle marker INSIDE the detected
+        polygon at vertex (nx,ny), aligned with its two edges. None if the
+        point is not a detected vertex."""
+        for fig in self._figures_ctx:
+            verts = fig.vertices
+            if len(verts) < 3:
+                continue
+            for i, (vx, vy) in enumerate(verts):
+                if math.hypot(nx - vx, ny - vy) > 6:
+                    continue
+                P = self._denorm(vx, vy)
+                A = self._denorm(*verts[i - 1])
+                B = self._denorm(*verts[(i + 1) % len(verts)])
+                a1 = math.degrees(math.atan2(A[1] - P[1], A[0] - P[0]))
+                a2 = math.degrees(math.atan2(B[1] - P[1], B[0] - P[0]))
+                rot = a1
+                # Marker spans [rot, rot+90]; flip if the second edge sits on
+                # the other side so the square lies between the two edges.
+                if (a2 - rot) % 360 > 180:
+                    rot -= 90
+                return rot
+        return None
+
