@@ -260,3 +260,58 @@ struct DSPrimaryButtonStyle: ButtonStyle {
     // is softly glowing, not just statically lit.
     @State private var isGlowBreathingIn = false
 
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 16, weight: .medium))
+            .foregroundColor(DS.Colors.textOnAccent)
+            .frame(maxWidth: isFullWidth ? .infinity : nil)
+            .padding(.vertical, 14)
+            .padding(.horizontal, isFullWidth ? 0 : 20)
+            .background(
+                Capsule()
+                    .fill(buttonBackgroundColor(isPressed: configuration.isPressed))
+            )
+            // Hover glow — builds up gradually, then gently breathes while hovered.
+            // The breathing oscillates opacity and radius on a slow 2.5s loop,
+            // creating a candle-flame-like "alive" quality rather than a static highlight.
+            .shadow(
+                color: DS.Colors.accent.opacity(
+                    isHoverGlowActive ? (isGlowBreathingIn ? 0.32 : 0.18) : 0
+                ),
+                radius: isHoverGlowActive ? (isGlowBreathingIn ? 16 : 10) : 0
+            )
+            // Hover: gradually expand to 1.03. Press: snap down to 0.97.
+            .scaleEffect(configuration.isPressed ? 0.97 : (isHoverScaleExpanded ? 1.03 : 1.0))
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+            .onHover { hovering in
+                // Background color — fast snap so the button feels responsive
+                withAnimation(.easeOut(duration: 0.15)) {
+                    isHovered = hovering
+                }
+
+                // Scale — slow, gradual expansion (like the button is swelling)
+                withAnimation(.easeInOut(duration: hovering ? 0.6 : 0.3)) {
+                    isHoverScaleExpanded = hovering
+                }
+
+                // Glow — builds up gradually on entry, fades faster on exit
+                withAnimation(.easeInOut(duration: hovering ? 0.6 : 0.3)) {
+                    isHoverGlowActive = hovering
+                }
+
+                // Breathing glow loop — gentle pulse while hovered.
+                // The 2.5s cycle keeps it feeling organic, not mechanical.
+                if hovering {
+                    withAnimation(
+                        .easeInOut(duration: 2.5)
+                        .repeatForever(autoreverses: true)
+                    ) {
+                        isGlowBreathingIn = true
+                    }
+                } else {
+                    // Override the repeating animation with a finite one to stop cleanly
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        isGlowBreathingIn = false
+                    }
+                }
+
