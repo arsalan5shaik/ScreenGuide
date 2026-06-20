@@ -621,3 +621,54 @@ struct BlueCursorView: View {
             navigationBubbleScale = 1.0
         }
 
+        let characterDelay = Double.random(in: 0.03...0.06)
+        DispatchQueue.main.asyncAfter(deadline: .now() + characterDelay) {
+            self.streamNavigationBubbleCharacter(
+                phrase: phrase,
+                characterIndex: characterIndex + 1,
+                onComplete: onComplete
+            )
+        }
+    }
+
+    /// Flies the buddy back to the current cursor position after pointing is done.
+    private func startFlyingBackToCursor() {
+        let mouseLocation = NSEvent.mouseLocation
+        let cursorInSwiftUI = convertScreenPointToSwiftUICoordinates(mouseLocation)
+        let cursorWithTrackingOffset = CGPoint(x: cursorInSwiftUI.x + 35, y: cursorInSwiftUI.y + 25)
+
+        cursorPositionWhenNavigationStarted = cursorInSwiftUI
+
+        buddyNavigationMode = .navigatingToTarget
+        isReturningToCursor = true
+
+        animateBezierFlightArc(to: cursorWithTrackingOffset) {
+            self.finishNavigationAndResumeFollowing()
+        }
+    }
+
+    /// Cancels an in-progress navigation because the user moved the cursor.
+    private func cancelNavigationAndResumeFollowing() {
+        navigationAnimationTimer?.invalidate()
+        navigationAnimationTimer = nil
+        navigationBubbleText = ""
+        navigationBubbleOpacity = 0.0
+        navigationBubbleScale = 1.0
+        buddyFlightScale = 1.0
+        finishNavigationAndResumeFollowing()
+    }
+
+    /// Returns the buddy to normal cursor-following mode after navigation completes.
+    private func finishNavigationAndResumeFollowing() {
+        navigationAnimationTimer?.invalidate()
+        navigationAnimationTimer = nil
+        buddyNavigationMode = .followingCursor
+        isReturningToCursor = false
+        triangleRotationDegrees = -35.0
+        buddyFlightScale = 1.0
+        navigationBubbleText = ""
+        navigationBubbleOpacity = 0.0
+        navigationBubbleScale = 1.0
+        companionManager.clearDetectedElementLocation()
+    }
+
