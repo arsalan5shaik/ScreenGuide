@@ -423,3 +423,53 @@ private final class AssemblyAIStreamingTranscriptionSession: NSObject, BuddyStre
             guard !self.hasResolvedReadyContinuation else { return }
             self.hasResolvedReadyContinuation = true
 
+            switch result {
+            case .success:
+                self.readyContinuation?.resume()
+            case .failure(let error):
+                self.readyContinuation?.resume(throwing: error)
+            }
+
+            self.readyContinuation = nil
+        }
+    }
+
+    private static func makeWebsocketURL(
+        temporaryToken: String?,
+        keyterms: [String]
+    ) throws -> URL {
+        guard var websocketURLComponents = URLComponents(string: websocketBaseURLString) else {
+            throw AssemblyAIStreamingTranscriptionProviderError(
+                message: "AssemblyAI websocket URL is invalid."
+            )
+        }
+
+        var queryItems = [
+            URLQueryItem(name: "sample_rate", value: "16000"),
+            URLQueryItem(name: "encoding", value: "pcm_s16le"),
+            URLQueryItem(name: "format_turns", value: "true"),
+            URLQueryItem(name: "speech_model", value: "u3-rt-pro")
+        ]
+
+        let normalizedKeyterms = keyterms
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        if !normalizedKeyterms.isEmpty,
+           let keytermsData = try? JSONSerialization.data(withJSONObject: normalizedKeyterms),
+           let keytermsJSONString = String(data: keytermsData, encoding: .utf8) {
+            queryItems.append(URLQueryItem(name: "keyterms_prompt", value: keytermsJSONString))
+        }
+
+        if let temporaryToken {
+            queryItems.append(URLQueryItem(name: "token", value: temporaryToken))
+        }
+
+        websocketURLComponents.queryItems = queryItems
+
+        guard let websocketURL = websocketURLComponents.url else {
+            throw AssemblyAIStreamingTranscriptionProviderError(
+                message: "AssemblyAI websocket URL could not be created."
+            )
+        }
+
