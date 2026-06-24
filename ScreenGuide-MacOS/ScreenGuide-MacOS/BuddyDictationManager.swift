@@ -649,3 +649,54 @@ final class BuddyDictationManager: NSObject, ObservableObject {
         lastRecordedAudioPowerSampleDate = .distantPast
     }
 
+    private func buildTranscriptionKeyterms() -> [String] {
+        let baseKeyterms = [
+            "makesomething",
+            "Learning Buddy",
+            "Codex",
+            "Claude",
+            "Anthropic",
+            "OpenAI",
+            "SwiftUI",
+            "Xcode",
+            "Vercel",
+            "Next.js",
+            "localhost"
+        ]
+
+        let combinedKeyterms = baseKeyterms + contextualKeyterms
+        var uniqueNormalizedKeyterms = Set<String>()
+        var orderedKeyterms: [String] = []
+
+        for keyterm in combinedKeyterms {
+            let trimmedKeyterm = keyterm.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedKeyterm.isEmpty else { continue }
+
+            let normalizedKeyterm = trimmedKeyterm.lowercased()
+            if uniqueNormalizedKeyterms.contains(normalizedKeyterm) {
+                continue
+            }
+
+            uniqueNormalizedKeyterms.insert(normalizedKeyterm)
+            orderedKeyterms.append(trimmedKeyterm)
+        }
+
+        return orderedKeyterms
+    }
+
+    private func updateAudioPowerLevel(from audioBuffer: AVAudioPCMBuffer) {
+        guard let channelData = audioBuffer.floatChannelData else { return }
+
+        let channelSamples = channelData[0]
+        let frameCount = Int(audioBuffer.frameLength)
+        guard frameCount > 0 else { return }
+
+        var summedSquares: Float = 0
+        for sampleIndex in 0..<frameCount {
+            let sample = channelSamples[sampleIndex]
+            summedSquares += sample * sample
+        }
+
+        let rootMeanSquare = sqrt(summedSquares / Float(frameCount))
+        let boostedLevel = min(max(rootMeanSquare * 10.2, 0), 1)
+
