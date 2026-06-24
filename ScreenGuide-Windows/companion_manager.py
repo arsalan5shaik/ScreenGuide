@@ -1074,3 +1074,86 @@ class CompanionManager(QObject):
                 return rot
         return None
 
+    # ── Drawing-tag extraction (deferred, order-preserving) ──────────────────
+
+    def _shape_from_tag(self, tag: str):
+        m = CIRCLE_AT_RE.fullmatch(tag)
+        if m:
+            name, color = m.groups()
+            bbox = self._resolve_anchor(name.strip())
+            if not bbox:
+                return None
+            l, t, r, b = bbox
+            return {"kind": "circle", "x": (l + r) / 2, "y": (t + b) / 2,
+                    "r": max(r - l, b - t) / 2 + 10, "label": "",
+                    "color": color or "blue"}
+        m = UNDERLINE_AT_RE.fullmatch(tag)
+        if m:
+            name, color = m.groups()
+            bbox = self._resolve_anchor(name.strip())
+            if not bbox:
+                return None
+            l, t, r, b = bbox
+            return {"kind": "underline", "x": l, "y": b + 3, "w": r - l,
+                    "color": color or "blue"}
+        m = LINE_RE.fullmatch(tag) or ARROW_RE.fullmatch(tag)
+        if m:
+            kind = "line" if tag.startswith("[LINE") else "arrow"
+            x1, y1, x2, y2, color = m.groups()
+            n1 = self._snap_pt(float(x1), float(y1))
+            n2 = self._snap_pt(float(x2), float(y2))
+            return {"kind": kind, "pts": [self._denorm(*n1), self._denorm(*n2)],
+                    "color": color or "blue"}
+        m = CIRCLE_RE.fullmatch(tag)
+        if m:
+            x, y, r, label, color = m.groups()
+            cx, cy = self._denorm(float(x), float(y))
+            return {"kind": "circle", "x": cx, "y": cy,
+                    "r": max(12.0, self._denorm_len(float(r))),
+                    "label": (label or "").strip(), "color": color or "blue"}
+        m = RECT_RE.fullmatch(tag)
+        if m:
+            x1, y1, x2, y2, color = m.groups()
+            p1 = self._denorm(*self._snap_pt(float(x1), float(y1)))
+            p2 = self._denorm(*self._snap_pt(float(x2), float(y2)))
+            return {"kind": "rect", "x1": p1[0], "y1": p1[1],
+                    "x2": p2[0], "y2": p2[1], "color": color or "blue"}
+        m = POLY_RE.fullmatch(tag)
+        if m:
+            pts_str, color = m.groups()
+            pts = [self._denorm(*self._snap_pt(float(a), float(b)))
+                   for a, b in re.findall(r'(\d+),(\d+)', pts_str)]
+            if len(pts) < 3:
+                return None
+            return {"kind": "poly", "pts": pts, "color": color or "blue"}
+        m = TEXT_RE.fullmatch(tag)
+        if m:
+            x, y, content, color, size = m.groups()
+            lx, ly = self._denorm(float(x), float(y))
+            return {"kind": "text", "x": lx, "y": ly, "text": content.strip(),
+                    "color": color or "blue", "size": size or "m"}
+        m = ANGLE_RE.fullmatch(tag)
+        if m:
+            x, y, s, rot, color = m.groups()
+            nx, ny = self._snap_pt(float(x), float(y))
+            auto_rot = self._angle_rot_for_vertex(nx, ny)
+            lx, ly = self._denorm(nx, ny)
+            return {"kind": "angle", "x": lx, "y": ly,
+                    "s": max(10.0, self._denorm_len(float(s))),
+                    "rot": auto_rot if auto_rot is not None else float(rot or 0),
+                    "color": color or "blue"}
+        m = UNDERLINE_RE.fullmatch(tag)
+        if m:
+            x, y, w, color = m.groups()
+            lx, ly = self._denorm(float(x), float(y))
+            return {"kind": "underline", "x": lx, "y": ly,
+                    "w": max(8.0, self._denorm_len(float(w))),
+                    "color": color or "blue"}
+        m = LABEL_RE.fullmatch(tag)
+        if m:
+            x, y, txt, color = m.groups()
+            lx, ly = self._denorm(float(x), float(y))
+            return {"kind": "text", "x": lx, "y": ly, "text": txt.strip(),
+                    "color": color or "blue", "size": "s"}
+        return None
+
