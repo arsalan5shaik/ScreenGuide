@@ -473,3 +473,6 @@ private final class AssemblyAIStreamingTranscriptionSession: NSObject, BuddyStre
             )
         }
 
+        return websocketURL
+    }
+}
