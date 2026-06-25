@@ -538,3 +538,22 @@ class TrayManager(QObject):
         )
         self.on_toggle_journal.emit(checked)
 
+    def set_recording_state(self, on: bool):
+        self._is_recording = on
+        self.rebuild_menu()
+
+    def set_state_icon(self, state: str):
+        self._tray.setIcon(self._icons.get(state, self._icons["idle"]))
+
+    def rebuild_menu(self):
+        """Rebuild so the Model submenu reflects the newly-active provider."""
+        self._build_menu()
+
+    def show_notification(self, title: str, message: str):
+        self._tray.showMessage(
+            title, message, QSystemTrayIcon.MessageIcon.Information, 3000
+        )
+
+    @property
+    def search_enabled(self) -> bool:
+        return self._search_enabled
