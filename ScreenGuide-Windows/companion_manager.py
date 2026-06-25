@@ -1157,3 +1157,54 @@ class CompanionManager(QObject):
                     "color": color or "blue", "size": "s"}
         return None
 
+    def _extract_shapes(self, text: str) -> list:
+        """All drawing shapes in a piece of text, in document order."""
+        shapes = []
+        for m in ANY_TAG_RE.finditer(text):
+            try:
+                sh = self._shape_from_tag(m.group(0))
+            except Exception:
+                sh = None
+            if sh:
+                shapes.append(sh)
+        return shapes
+
+    # ── Teacher-style narrated playback ──────────────────────────────────────
+
+    def _segment_lesson(self, full_response: str) -> list:
+        """Split a response into (sentence, [shapes]) pairs, preserving which
+        sentence each drawing tag belongs to."""
+        tags: list[str] = []
+
+        def _stash(m):
+            tags.append(m.group(0))
+            return f"\x00{len(tags) - 1}\x00"
+
+        masked = ANY_TAG_RE.sub(_stash, full_response)
+        parts = re.split(r'(?<=[.!?])\s+', masked)
+        out = []
+        for part in parts:
+            ids = [int(i) for i in re.findall(r'\x00(\d+)\x00', part)]
+            shapes = self._extract_shapes("".join(tags[i] for i in ids))
+            clean = re.sub(r'\s+', ' ', re.sub(r'\x00\d+\x00', ' ', part)).strip()
+            if clean or shapes:
+                out.append((clean, shapes))
+        return out
+
+    async def _play_lesson(self, full_response: str, clean: str):
+        """Narrate sentence by sentence, drawing each sentence's shapes as it
+        is spoken — the cadence of a teacher at a whiteboard. Falls back to
+        plain TTS when the response contains no drawings."""
+        segments = self._segment_lesson(full_response)
+        if not any(shapes for _, shapes in segments):
+            await self._get_tts().speak(_speakable(clean))
+            return
+
+        try:
+            from ui.overlay import (
+                _shape_length, STROKE_SPEED_PX_S,
+                SHAPE_DRAW_MIN_S, SHAPE_DRAW_MAX_S, SHAPE_GAP_SECONDS,
+            )
+        except Exception:
+            _shape_length = None
+
