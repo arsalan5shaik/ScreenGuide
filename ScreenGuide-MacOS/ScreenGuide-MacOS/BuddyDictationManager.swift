@@ -700,3 +700,53 @@ final class BuddyDictationManager: NSObject, ObservableObject {
         let rootMeanSquare = sqrt(summedSquares / Float(frameCount))
         let boostedLevel = min(max(rootMeanSquare * 10.2, 0), 1)
 
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+
+            let smoothedAudioPowerLevel = max(
+                CGFloat(boostedLevel),
+                self.currentAudioPowerLevel * 0.72
+            )
+            self.currentAudioPowerLevel = smoothedAudioPowerLevel
+
+            let now = Date()
+            if now.timeIntervalSince(self.lastRecordedAudioPowerSampleDate)
+                >= Self.recordedAudioPowerHistorySampleIntervalSeconds {
+                self.lastRecordedAudioPowerSampleDate = now
+                self.appendRecordedAudioPowerSample(
+                    max(CGFloat(boostedLevel), Self.recordedAudioPowerHistoryBaselineLevel)
+                )
+            }
+        }
+    }
+
+    private func appendRecordedAudioPowerSample(_ audioPowerSample: CGFloat) {
+        var updatedRecordedAudioPowerHistory = recordedAudioPowerHistory
+        updatedRecordedAudioPowerHistory.append(audioPowerSample)
+
+        if updatedRecordedAudioPowerHistory.count > Self.recordedAudioPowerHistoryLength {
+            updatedRecordedAudioPowerHistory.removeFirst(
+                updatedRecordedAudioPowerHistory.count - Self.recordedAudioPowerHistoryLength
+            )
+        }
+
+        recordedAudioPowerHistory = updatedRecordedAudioPowerHistory
+    }
+
+    private func requestMicrophoneAndSpeechPermissionsIfNeeded() async -> Bool {
+        let hasMicrophonePermission = await requestMicrophonePermissionIfNeeded()
+        guard hasMicrophonePermission else {
+            lastErrorMessage = "microphone permission is required for push to talk."
+            return false
+        }
+
+        guard transcriptionProvider.requiresSpeechRecognitionPermission else {
+            return true
+        }
+
+        let hasSpeechRecognitionPermission = await requestSpeechRecognitionPermissionIfNeeded()
+        guard hasSpeechRecognitionPermission else {
+            lastErrorMessage = "speech recognition permission is required for push to talk."
+            return false
+        }
+
