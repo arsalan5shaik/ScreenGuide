@@ -750,3 +750,62 @@ final class BuddyDictationManager: NSObject, ObservableObject {
             return false
         }
 
+        return true
+    }
+
+    /// macOS can show the microphone/speech sheet again if we accidentally fan out
+    /// multiple permission requests before the first one finishes. We keep exactly
+    /// one in-flight request task so rapid repeat presses all await the same result.
+    ///
+    /// After the task completes, we skip re-requesting for a short cooldown period
+    /// so macOS has time to update its authorization cache. This prevents the
+    /// permission dialog from popping up again on rapid follow-up presses.
+    private func requestMicrophoneAndSpeechPermissionsWithoutDuplicatePrompts() async -> Bool {
+        // If a permission request is already in-flight, reuse it.
+        if let activePermissionRequestTask {
+            return await activePermissionRequestTask.value
+        }
+
+        // If we just finished a permission request very recently, skip re-requesting.
+        // macOS can briefly report .notDetermined even after the user tapped Allow,
+        // so we trust the cached result for a short window.
+        if let lastPermissionRequestCompletedAt,
+           Date().timeIntervalSince(lastPermissionRequestCompletedAt) < 1.0 {
+            return AVCaptureDevice.authorizationStatus(for: .audio) != .denied
+                && AVCaptureDevice.authorizationStatus(for: .audio) != .restricted
+        }
+
+        let permissionRequestTask = Task { @MainActor in
+            await self.requestMicrophoneAndSpeechPermissionsIfNeeded()
+        }
+
+        activePermissionRequestTask = permissionRequestTask
+
+        let hasPermissions = await permissionRequestTask.value
+        activePermissionRequestTask = nil
+        lastPermissionRequestCompletedAt = Date()
+        return hasPermissions
+    }
+
+    private func requestMicrophonePermissionIfNeeded() async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized:
+            currentPermissionProblem = nil
+            return true
+        case .notDetermined:
+            let isGranted = await withCheckedContinuation { continuation in
+                AVCaptureDevice.requestAccess(for: .audio) { isGranted in
+                    continuation.resume(returning: isGranted)
+                }
+            }
+            currentPermissionProblem = isGranted ? nil : .microphoneAccessDenied
+            return isGranted
+        case .denied, .restricted:
+            currentPermissionProblem = .microphoneAccessDenied
+            return false
+        @unknown default:
+            currentPermissionProblem = .microphoneAccessDenied
+            return false
+        }
+    }
+
