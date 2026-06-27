@@ -1208,3 +1208,64 @@ class CompanionManager(QObject):
         except Exception:
             _shape_length = None
 
+        draw_end = time.monotonic()
+        for text, shapes in segments:
+            if self._cancel_flag:
+                break
+            draw_end = max(draw_end, time.monotonic())
+            for sh in shapes:
+                self.sig_draw.emit(sh)
+                if _shape_length is not None:
+                    dur = _shape_length(sh) / STROKE_SPEED_PX_S
+                    dur = max(SHAPE_DRAW_MIN_S, min(SHAPE_DRAW_MAX_S, dur))
+                    draw_end += dur + SHAPE_GAP_SECONDS
+                else:
+                    draw_end += 1.0
+            if text:
+                try:
+                    await self._get_tts().speak(_speakable(text))
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    pass
+            # A real teacher finishes the stroke before the next sentence —
+            # wait out any drawing time the narration didn't cover.
+            remaining = draw_end - time.monotonic()
+            if remaining > 0:
+                await asyncio.sleep(min(remaining, 4.0) + 0.1)
+
+    def _emit_state(self, state: AppState):
+        self._state = state
+        self.sig_state_changed.emit(state)
+
+    # ── Settings ──────────────────────────────────────────────────────────────
+
+    def set_model(self, model: str):
+        self._current_model = model
+
+    def set_active_provider(self, name: str):
+        """Runtime switch between claude / openai / copilot / gemini / ollama."""
+        cfg.set_active_llm(name)
+        self._llm = None           # force re-init on next query
+        self._current_model = None
+        # If switching to Copilot and the cached model list is stale (or
+        # missing), refresh it in the background so the panel shows the
+        # *current* set of models GitHub offers — not stale hardcoded ones.
+        if name == "copilot":
+            try:
+                from ai.github_copilot_provider import cache_is_stale
+                if cache_is_stale():
+                    self._submit(self._refresh_copilot_models())
+            except Exception:
+                pass
+        elif name in ("claude", "openai", "gemini"):
+            try:
+                from ai.model_registry import cache_is_stale as _stale
+                if _stale(name):
+                    self._submit(self._refresh_one_model_list(name))
+            except Exception:
+                pass
+        elif name == "ollama":
+            # Surface installed models in the tray immediately
+            self.refresh_ollama_models()
+
