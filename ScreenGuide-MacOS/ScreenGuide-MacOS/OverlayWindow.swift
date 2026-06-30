@@ -672,3 +672,63 @@ struct BlueCursorView: View {
         companionManager.clearDetectedElementLocation()
     }
 
+    // MARK: - Welcome Animation
+
+    private func startWelcomeAnimation() {
+        withAnimation(.easeIn(duration: 0.4)) {
+            self.bubbleOpacity = 1.0
+        }
+
+        var currentIndex = 0
+        Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { timer in
+            guard currentIndex < self.fullWelcomeMessage.count else {
+                timer.invalidate()
+                // Hold the text for 2 seconds, then fade it out
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    self.bubbleOpacity = 0.0
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+                    self.showWelcome = false
+                    // Start the onboarding video right after the welcome text disappears
+                    self.companionManager.setupOnboardingVideo()
+                }
+                return
+            }
+
+            let index = self.fullWelcomeMessage.index(self.fullWelcomeMessage.startIndex, offsetBy: currentIndex)
+            self.welcomeText.append(self.fullWelcomeMessage[index])
+            currentIndex += 1
+        }
+    }
+}
+
+// MARK: - Blue Cursor Waveform
+
+/// A small blue waveform that replaces the triangle cursor while
+/// the user is holding the push-to-talk shortcut and speaking.
+private struct BlueCursorWaveformView: View {
+    let audioPowerLevel: CGFloat
+
+    private let barCount = 5
+    private let listeningBarProfile: [CGFloat] = [0.4, 0.7, 1.0, 0.7, 0.4]
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 36.0)) { timelineContext in
+            HStack(alignment: .center, spacing: 2) {
+                ForEach(0..<barCount, id: \.self) { barIndex in
+                    RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                        .fill(DS.Colors.overlayCursorBlue)
+                        .frame(
+                            width: 2,
+                            height: barHeight(
+                                for: barIndex,
+                                timelineDate: timelineContext.date
+                            )
+                        )
+                }
+            }
+            .shadow(color: DS.Colors.overlayCursorBlue.opacity(0.6), radius: 6, x: 0, y: 0)
+            .animation(.linear(duration: 0.08), value: audioPowerLevel)
+        }
+    }
+
