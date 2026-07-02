@@ -1269,3 +1269,58 @@ class CompanionManager(QObject):
             # Surface installed models in the tray immediately
             self.refresh_ollama_models()
 
+    async def _refresh_one_model_list(self, provider: str):
+        try:
+            from ai.model_registry import refresh
+            ms = await refresh(provider)
+            self.sig_models_refreshed.emit(provider, len(ms))
+        except Exception as e:
+            self.sig_error.emit(f"{provider} model refresh failed: {e}")
+
+    def refresh_copilot_models(self):
+        """Public — bound to the tray 'Refresh Copilot models' action."""
+        self._submit(self._refresh_copilot_models())
+
+    async def _refresh_copilot_models(self):
+        try:
+            from ai.github_copilot_provider import refresh_models_to_cache
+            models = await refresh_models_to_cache()
+            self.sig_copilot_models_done.emit(len(models))
+        except Exception as e:
+            self.sig_error.emit(f"Copilot model refresh failed: {e}")
+
+    # ── Ollama model management ──────────────────────────────────────────────
+
+    def refresh_ollama_models(self):
+        """Public — kick off async poll of /api/tags. Result via sig_ollama_models."""
+        self._submit(self._refresh_ollama_models())
+
+    async def _refresh_ollama_models(self):
+        try:
+            from ai.ollama_provider import OllamaProvider
+            classified = await OllamaProvider().list_models_classified()
+            self.sig_ollama_models.emit(classified)
+        except Exception as e:
+            self.sig_error.emit(f"Ollama model list failed: {e}")
+
+    def set_ollama_model(self, kind: str, name: str):
+        """Tray callback — update the active vision/text model. No restart needed."""
+        cfg.set_ollama_model(kind, name)
+        # Force the provider instance to re-read cfg on next call
+        if cfg.llm_provider() == "ollama":
+            self._llm = None
+
+    def set_custom_instructions(self, text: str):
+        """Tray callback — restrict/steer what ScreenGuide helps with. Persists
+        to .env so it survives a restart, not just this session."""
+        cfg.custom_instructions = text.strip()
+        try:
+            from dotenv import set_key
+            env_path = Path(__file__).parent / ".env"
+            if not env_path.exists():
+                env_path.touch()
+            escaped = text.strip().replace("\n", "\\n")
+            set_key(str(env_path), "CUSTOM_INSTRUCTIONS", escaped)
+        except Exception as e:
+            self.sig_error.emit(f"Could not save instructions: {e}")
+
