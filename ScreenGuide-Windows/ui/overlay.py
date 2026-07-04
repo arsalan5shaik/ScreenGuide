@@ -631,3 +631,58 @@ class CursorOverlay(QWidget):
                     ay = y2 - head * math.sin(ang + sign * math.radians(28))
                     p.drawLine(QPointF(x2, y2), QPointF(ax, ay))
 
+    def _paint_circle(self, p, ann, u, col, alpha):
+        x = ann["x"] - self.x()
+        y = ann["y"] - self.y()
+        r = ann["r"]
+        rect = QRectF(x - r, y - r, 2 * r, 2 * r)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        # Sweep the arc clockwise from 12 o'clock as it draws in
+        span = int(-360 * 16 * u)
+        for pen in self._pens(col, 3.5):
+            p.setPen(pen)
+            p.drawArc(rect, 90 * 16, span)
+        label = ann.get("label", "")
+        if label and u >= 1.0:
+            f = QFont("Segoe UI", 11, QFont.Weight.Bold)
+            p.setFont(f)
+            fm = p.fontMetrics()
+            tx = x - fm.horizontalAdvance(label) / 2
+            ty = y - r - 8
+            self._outlined_text(p, tx, ty, label, col, alpha)
+
+    def _paint_angle(self, p, ann, u, col):
+        """Right-angle marker: a small square corner at (x,y), rotated rot°."""
+        x, y = ann["x"], ann["y"]
+        s = ann.get("s", 22)
+        rot = math.radians(ann.get("rot", 0))
+        d1 = (math.cos(rot), math.sin(rot))
+        d2 = (math.cos(rot + math.pi / 2), math.sin(rot + math.pi / 2))
+        p1 = (x + d1[0] * s, y + d1[1] * s)
+        p2 = (x + (d1[0] + d2[0]) * s, y + (d1[1] + d2[1]) * s)
+        p3 = (x + d2[0] * s, y + d2[1] * s)
+        self._paint_stroke_path(p, [p1, p2, p3], False, u, col, width=3.0)
+
+    def _paint_text(self, p, ann, u, col, alpha):
+        x = ann["x"] - self.x()
+        y = ann["y"] - self.y()
+        pt_size = _TEXT_SIZES.get(ann.get("size", "m"), 17)
+        font = QFont("Segoe UI", pt_size, QFont.Weight.Bold)
+        p.setFont(font)
+        # Ease in: fade + slight rise
+        fade = u * alpha
+        y += (1.0 - u) * 6
+        self._outlined_text(p, x, y, ann["text"], col, fade)
+
+    def _outlined_text(self, p, x, y, text, col, alpha):
+        """Text with a dark outline so it reads on any background."""
+        shadow = QColor(0, 0, 0)
+        shadow.setAlpha(int(170 * alpha))
+        p.setPen(QPen(shadow, 1))
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (1, 1)):
+            p.drawText(QPointF(x + dx, y + dy), text)
+        c = QColor(col)
+        c.setAlpha(int(255 * alpha))
+        p.setPen(QPen(c, 1))
+        p.drawText(QPointF(x, y), text)
+
