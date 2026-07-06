@@ -739,3 +739,57 @@ class CursorOverlay(QWidget):
             p.setPen(Qt.PenStyle.NoPen)
             p.drawEllipse(QPointF(0, 0), size * r_mul * 0.5, size * r_mul * 0.5)
 
+        p.rotate(self._rotation_deg)
+        p.scale(self._flight_scale, self._flight_scale)
+        p.setBrush(QBrush(CURSOR_BLUE))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawPath(path)
+
+        p.restore()
+
+    def _draw_waveform(self, p, cx, cy):
+        """5 vertical rounded bars reacting to audio (mirrors BlueCursorWaveformView)."""
+        bar_count = 5
+        profile = (0.4, 0.7, 1.0, 0.7, 0.4)
+        bar_w = 2.0
+        spacing = 2.0
+        total_w = bar_count * bar_w + (bar_count - 1) * spacing
+
+        # Glow behind bars
+        glow = QColor(CURSOR_BLUE)
+        for r_mul, a in ((2.0, 40), (1.3, 70)):
+            glow.setAlpha(a)
+            p.setBrush(QBrush(glow))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(QPointF(cx, cy), 10 * r_mul, 10 * r_mul)
+
+        p.setBrush(QBrush(CURSOR_BLUE))
+        p.setPen(Qt.PenStyle.NoPen)
+
+        for i in range(bar_count):
+            phase = self._phase * 1.8 + i * 0.35
+            reactive = self._audio_level * 10 * profile[i]
+            idle_pulse = (math.sin(phase) + 1) / 2 * 1.5
+            h = 3 + reactive + idle_pulse
+            x = cx - total_w / 2 + i * (bar_w + spacing)
+            y = cy - h / 2
+            p.drawRoundedRect(QRectF(x, y, bar_w, h), 1.2, 1.2)
+
+    def _draw_spinner(self, p, cx, cy):
+        """Rotating arc — mirrors BlueCursorSpinnerView (trim 0.15 → 0.85)."""
+        diameter = 14.0
+        rect = QRectF(cx - diameter / 2, cy - diameter / 2, diameter, diameter)
+
+        # Glow
+        glow = QColor(CURSOR_BLUE)
+        for r_mul, a in ((2.0, 40), (1.3, 70)):
+            glow.setAlpha(a)
+            p.setBrush(QBrush(glow))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(QPointF(cx, cy), diameter * r_mul * 0.5, diameter * r_mul * 0.5)
+
+        pen = QPen(CURSOR_BLUE, 2.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+
