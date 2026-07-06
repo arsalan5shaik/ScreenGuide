@@ -491,3 +491,53 @@ final class CompanionManager: ObservableObject {
             // Dismiss the menu bar panel so it doesn't cover the screen
             NotificationCenter.default.post(name: .screenguideDismissPanel, object: nil)
 
+            // Cancel any in-progress response and TTS from a previous utterance
+            currentResponseTask?.cancel()
+            elevenLabsTTSClient.stopPlayback()
+            clearDetectedElementLocation()
+
+            // Dismiss the onboarding prompt if it's showing
+            if showOnboardingPrompt {
+                withAnimation(.easeOut(duration: 0.3)) {
+                    onboardingPromptOpacity = 0.0
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    self.showOnboardingPrompt = false
+                    self.onboardingPromptText = ""
+                }
+            }
+    
+
+            ScreenGuideAnalytics.trackPushToTalkStarted()
+
+            pendingKeyboardShortcutStartTask?.cancel()
+            pendingKeyboardShortcutStartTask = Task {
+                await buddyDictationManager.startPushToTalkFromKeyboardShortcut(
+                    currentDraftText: "",
+                    updateDraftText: { _ in
+                        // Partial transcripts are hidden (waveform-only UI)
+                    },
+                    submitDraftText: { [weak self] finalTranscript in
+                        self?.lastTranscript = finalTranscript
+                        print("🗣️ Companion received transcript: \(finalTranscript)")
+                        ScreenGuideAnalytics.trackUserMessageSent(transcript: finalTranscript)
+                        self?.sendTranscriptToClaudeWithScreenshot(transcript: finalTranscript)
+                    }
+                )
+            }
+        case .released:
+            // Cancel the pending start task in case the user released the shortcut
+            // before the async startPushToTalk had a chance to begin recording.
+            // Without this, a quick press-and-release drops the release event and
+            // leaves the waveform overlay stuck on screen indefinitely.
+            ScreenGuideAnalytics.trackPushToTalkReleased()
+            pendingKeyboardShortcutStartTask?.cancel()
+            pendingKeyboardShortcutStartTask = nil
+            buddyDictationManager.stopPushToTalkFromKeyboardShortcut()
+        case .none:
+            break
+        }
+    }
+
+    // MARK: - Companion Prompt
+
