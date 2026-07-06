@@ -686,3 +686,56 @@ class CursorOverlay(QWidget):
         p.setPen(QPen(c, 1))
         p.drawText(QPointF(x, y), text)
 
+    def _draw_ring(self, p):
+        """Pulsing blue ring around the detected UI element."""
+        rx, ry, base_r = self._ring
+        rx -= self.x()
+        ry -= self.y()
+        pulse = (math.sin(self._ring_phase) + 1) / 2   # 0..1
+        r = base_r + pulse * 6
+        # Outer halo
+        glow = QColor(CURSOR_BLUE)
+        glow.setAlpha(60)
+        pen = QPen(glow, 4)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawEllipse(QPointF(rx, ry), r + 3, r + 3)
+        # Crisp inner ring
+        inner = QColor(CURSOR_BLUE)
+        inner.setAlpha(190)
+        pen = QPen(inner, 2)
+        p.setPen(pen)
+        p.drawEllipse(QPointF(rx, ry), r, r)
+
+    def _draw_glow(self, p, cx, cy, radius, color_alpha=90):
+        """Cheap soft shadow approximating Swift's .shadow(radius: 8)."""
+        g = QColor(CURSOR_BLUE)
+        for i, r_mul in enumerate((1.6, 1.25, 1.0)):
+            g.setAlpha(color_alpha // (i + 1))
+            p.setBrush(QBrush(g))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(QPointF(cx, cy), radius * r_mul, radius * r_mul)
+
+    def _draw_triangle(self, p, cx, cy):
+        """Flat blue equilateral triangle, rotated -35° → cursor-like tilt."""
+        size = TRI_SIZE
+        height = size * math.sqrt(3) / 2
+
+        # Build triangle in local coords, then rotate/translate
+        path = QPainterPath()
+        path.moveTo(0, -height / 1.5)              # top vertex
+        path.lineTo(-size / 2, height / 3)         # bottom-left
+        path.lineTo( size / 2, height / 3)         # bottom-right
+        path.closeSubpath()
+
+        p.save()
+        p.translate(cx, cy)
+
+        # Glow — drawn unrotated so it's a round halo
+        glow = QColor(CURSOR_BLUE)
+        for i, (r_mul, alpha) in enumerate(((2.2, 35), (1.6, 55), (1.15, 85))):
+            glow.setAlpha(alpha)
+            p.setBrush(QBrush(glow))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(QPointF(0, 0), size * r_mul * 0.5, size * r_mul * 0.5)
+
