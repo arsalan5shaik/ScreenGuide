@@ -1324,3 +1324,53 @@ class CompanionManager(QObject):
         except Exception as e:
             self.sig_error.emit(f"Could not save instructions: {e}")
 
+    def set_response_language(self, code: str):
+        """Tray callback — pin ScreenGuide's reply language ('' = auto-detect)."""
+        cfg.response_language = code
+        try:
+            from dotenv import set_key
+            env_path = Path(__file__).parent / ".env"
+            if not env_path.exists():
+                env_path.touch()
+            set_key(str(env_path), "RESPONSE_LANGUAGE", code)
+        except Exception as e:
+            self.sig_error.emit(f"Could not save language setting: {e}")
+
+    def set_mic_device(self, device_index: int):
+        """Tray callback — switch input device without restarting the app."""
+        cfg.mic_device_index = device_index if device_index >= 0 else None
+        try:
+            self._listener.stop()
+        except Exception:
+            pass
+        from audio.ambient_listener import AmbientListener
+        self._listener = AmbientListener(
+            on_level=self._handle_level,
+            on_wake=self._handle_wake,
+            device=cfg.mic_device_index,
+        )
+        try:
+            self._listener.start()
+        except Exception as e:
+            self.sig_error.emit(f"Could not start mic: {e}")
+
+    def pull_ollama_model(self, name: str):
+        """Trigger `ollama pull <name>` in the background. Status via sig_ollama_pull_status."""
+        self._submit(self._pull_ollama_model(name))
+
+    async def _pull_ollama_model(self, name: str):
+        from ai.ollama_models_registry import pull_model
+        self.sig_ollama_pull_status.emit(name, f"Pulling {name}…")
+
+        def _progress(msg: str):
+            if msg:
+                self.sig_ollama_pull_status.emit(name, msg)
+
+        ok = await pull_model(name, cfg.ollama_host, on_progress=_progress)
+        if ok:
+            self.sig_ollama_pull_status.emit(name, f"✓ {name} ready")
+            # Refresh the installed list so the tray menu picks it up
+            await self._refresh_ollama_models()
+        else:
+            self.sig_ollama_pull_status.emit(name, f"✗ Pull failed for {name}")
+
