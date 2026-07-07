@@ -809,3 +809,55 @@ final class BuddyDictationManager: NSObject, ObservableObject {
         }
     }
 
+    private func requestSpeechRecognitionPermissionIfNeeded() async -> Bool {
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized:
+            currentPermissionProblem = nil
+            return true
+        case .notDetermined:
+            let isGranted = await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { authorizationStatus in
+                    continuation.resume(returning: authorizationStatus == .authorized)
+                }
+            }
+            currentPermissionProblem = isGranted ? nil : .speechRecognitionDenied
+            return isGranted
+        case .denied, .restricted:
+            currentPermissionProblem = .speechRecognitionDenied
+            return false
+        @unknown default:
+            currentPermissionProblem = .speechRecognitionDenied
+            return false
+        }
+    }
+
+    func openRelevantPrivacySettings() {
+        let settingsURLString: String
+
+        switch currentPermissionProblem {
+        case .microphoneAccessDenied:
+            settingsURLString = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone"
+        case .speechRecognitionDenied:
+            settingsURLString = "x-apple.systempreferences:com.apple.preference.security?Privacy_SpeechRecognition"
+        case nil:
+            settingsURLString = "x-apple.systempreferences:com.apple.preference.security"
+        }
+
+        guard let settingsURL = URL(string: settingsURLString) else { return }
+        NSWorkspace.shared.open(settingsURL)
+    }
+
+    private func userFacingErrorMessage(from error: Error, fallback: String) -> String {
+        if let localizedError = error as? LocalizedError,
+           let errorDescription = localizedError.errorDescription?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !errorDescription.isEmpty {
+            return errorDescription
+        }
+
+        let errorDescription = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !errorDescription.isEmpty,
+           errorDescription != "The operation couldn’t be completed." {
+            return errorDescription
+        }
+
