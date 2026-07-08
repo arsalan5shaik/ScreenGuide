@@ -793,3 +793,50 @@ class CursorOverlay(QWidget):
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
 
+        # 70% of the circle (0.15→0.85), rotating
+        start_deg = -self._spin_phase * 180 / math.pi * 2
+        span_deg = 252   # 0.7 * 360
+        p.drawArc(rect, int(start_deg * 16) % (360 * 16), int(span_deg * 16))
+
+    def _draw_bubble(self, p, cx, cy, label: str):
+        """Speech bubble next to the buddy, matches Swift pill style."""
+        font = QFont("Segoe UI", 9, QFont.Weight.Medium)
+        p.setFont(font)
+        fm = p.fontMetrics()
+
+        pad_x, pad_y = 8, 4
+        tw = fm.horizontalAdvance(label) + pad_x * 2
+        th = fm.height() + pad_y * 2
+
+        # Swift positions bubble at (cursor.x + 10 + bubbleW/2, cursor.y + 18)
+        box_x = cx + 10
+        box_y = cy + 18 - th / 2
+
+        # Apply scale-bounce entrance around the bubble's left edge
+        scale = max(0.01, self._bubble_scale)
+        p.save()
+        p.translate(box_x, box_y + th / 2)
+        p.scale(scale, scale)
+        p.translate(-box_x, -(box_y + th / 2))
+
+        a = int(255 * self._bubble_alpha)
+        bg = QColor(CURSOR_BLUE)
+        bg.setAlpha(a)
+        glow = QColor(CURSOR_BLUE)
+        glow.setAlpha(int(90 * self._bubble_alpha))
+
+        # Glow
+        p.setBrush(QBrush(glow))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawRoundedRect(QRectF(box_x - 4, box_y - 4, tw + 8, th + 8), 9, 9)
+
+        # Pill
+        p.setBrush(QBrush(bg))
+        p.drawRoundedRect(QRectF(box_x, box_y, tw, th), 6, 6)
+
+        # Text
+        text_color = QColor(255, 255, 255, a)
+        p.setPen(QPen(text_color, 1))
+        p.drawText(QRectF(box_x, box_y, tw, th), Qt.AlignmentFlag.AlignCenter, label)
+
+        p.restore()
