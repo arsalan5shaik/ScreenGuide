@@ -732,3 +732,55 @@ private struct BlueCursorWaveformView: View {
         }
     }
 
+    private func barHeight(for barIndex: Int, timelineDate: Date) -> CGFloat {
+        let animationPhase = CGFloat(timelineDate.timeIntervalSinceReferenceDate * 3.6) + CGFloat(barIndex) * 0.35
+        let normalizedAudioPowerLevel = max(audioPowerLevel - 0.008, 0)
+        let easedAudioPowerLevel = pow(min(normalizedAudioPowerLevel * 2.85, 1), 0.76)
+        let reactiveHeight = easedAudioPowerLevel * 10 * listeningBarProfile[barIndex]
+        let idlePulse = (sin(animationPhase) + 1) / 2 * 1.5
+        return 3 + reactiveHeight + idlePulse
+    }
+}
+
+// MARK: - Blue Cursor Spinner
+
+/// A small blue spinning indicator that replaces the triangle cursor
+/// while the AI is processing a voice input.
+private struct BlueCursorSpinnerView: View {
+    @State private var isSpinning = false
+
+    var body: some View {
+        Circle()
+            .trim(from: 0.15, to: 0.85)
+            .stroke(
+                AngularGradient(
+                    colors: [
+                        DS.Colors.overlayCursorBlue.opacity(0.0),
+                        DS.Colors.overlayCursorBlue
+                    ],
+                    center: .center
+                ),
+                style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
+            )
+            .frame(width: 14, height: 14)
+            .rotationEffect(.degrees(isSpinning ? 360 : 0))
+            .shadow(color: DS.Colors.overlayCursorBlue.opacity(0.6), radius: 6, x: 0, y: 0)
+            .onAppear {
+                withAnimation(.linear(duration: 0.8).repeatForever(autoreverses: false)) {
+                    isSpinning = true
+                }
+            }
+    }
+}
+
+// Manager for overlay windows — creates one per screen so the cursor
+// buddy seamlessly follows the cursor across multiple monitors.
+@MainActor
+class OverlayWindowManager {
+    private var overlayWindows: [OverlayWindow] = []
+    var hasShownOverlayBefore = false
+
+    func showOverlay(onScreens screens: [NSScreen], companionManager: CompanionManager) {
+        // Hide any existing overlays
+        hideOverlay()
+
