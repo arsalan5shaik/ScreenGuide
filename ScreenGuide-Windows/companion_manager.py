@@ -1374,3 +1374,59 @@ class CompanionManager(QObject):
         else:
             self.sig_ollama_pull_status.emit(name, f"✗ Pull failed for {name}")
 
+    def set_web_search(self, enabled: bool):
+        self._web_search_enabled = enabled
+
+    def set_wake_word(self, enabled: bool):
+        self._listener.set_wake_word_enabled(enabled)
+
+    def set_slow_mode(self, enabled: bool):
+        self._slow_mode = enabled
+
+    def set_quiz_mode(self, enabled: bool):
+        was = self._quiz_mode
+        self._quiz_mode = enabled
+        if enabled and not was:
+            # Kick off the first question immediately so the user doesn't
+            # have to ask "begin quiz". Uses the active screen as context.
+            self._submit(self._kickoff_quiz())
+
+    async def _kickoff_quiz(self):
+        """Called when quiz mode flips ON — generates the first question
+        without waiting for a user utterance."""
+        if self._state != AppState.IDLE:
+            return
+        try:
+            self._emit_state(AppState.THINKING)
+            screenshots = capture_all_screens()
+            images_b64 = [s.base64_jpeg for s in screenshots]
+            title = active_window_title()
+            system = _build_system_prompt(
+                window_title=title, quiz_mode=True,
+            )
+            ak = app_key(title)
+            history = self._app_memory.setdefault(ak, [])
+
+            full = ""
+            async for chunk in self._get_llm().stream_response(
+                user_text="(quiz mode just enabled — start the quiz now)",
+                screenshots_b64=images_b64,
+                history=history,
+                system_prompt=system,
+                model=self._current_model,
+            ):
+                if self._cancel_flag:
+                    break
+                full += chunk
+                self.sig_response_chunk.emit(chunk)
+            self.sig_response_done.emit(full)
+            self._emit_state(AppState.SPEAKING)
+            try:
+                await self._get_tts().speak(full)
+            except Exception:
+                pass
+        except Exception as e:
+            self.sig_error.emit(f"Quiz start failed: {e}")
+        finally:
+            self._emit_state(AppState.IDLE)
+
