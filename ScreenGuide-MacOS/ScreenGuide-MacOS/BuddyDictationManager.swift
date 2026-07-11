@@ -861,3 +861,6 @@ final class BuddyDictationManager: NSObject, ObservableObject {
             return errorDescription
         }
 
+        return fallback
+    }
+}
