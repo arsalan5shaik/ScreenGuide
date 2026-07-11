@@ -784,3 +784,53 @@ class OverlayWindowManager {
         // Hide any existing overlays
         hideOverlay()
 
+        // Track if this is the first time showing overlay (welcome message)
+        let isFirstAppearance = !hasShownOverlayBefore
+        hasShownOverlayBefore = true
+
+        // Create one overlay window per screen
+        for screen in screens {
+            let window = OverlayWindow(screen: screen)
+
+            let contentView = BlueCursorView(
+                screenFrame: screen.frame,
+                isFirstAppearance: isFirstAppearance,
+                companionManager: companionManager
+            )
+
+            let hostingView = NSHostingView(rootView: contentView)
+            hostingView.frame = screen.frame
+            window.contentView = hostingView
+
+            overlayWindows.append(window)
+            window.orderFrontRegardless()
+        }
+    }
+
+    func hideOverlay() {
+        for window in overlayWindows {
+            window.orderOut(nil)
+            window.contentView = nil
+        }
+        overlayWindows.removeAll()
+    }
+
+    /// Fades out overlay windows over `duration` seconds, then removes them.
+    func fadeOutAndHideOverlay(duration: TimeInterval = 0.4) {
+        let windowsToFade = overlayWindows
+        overlayWindows.removeAll()
+
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = duration
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            for window in windowsToFade {
+                window.animator().alphaValue = 0
+            }
+        }, completionHandler: {
+            for window in windowsToFade {
+                window.orderOut(nil)
+                window.contentView = nil
+            }
+        })
+    }
+
