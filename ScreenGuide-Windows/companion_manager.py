@@ -1430,3 +1430,56 @@ class CompanionManager(QObject):
         finally:
             self._emit_state(AppState.IDLE)
 
+    def set_privacy_guard(self, enabled: bool):
+        self._privacy_guard = enabled
+
+    @property
+    def slow_mode(self) -> bool:  return self._slow_mode
+    @property
+    def quiz_mode(self) -> bool:  return self._quiz_mode
+    @property
+    def privacy_guard(self) -> bool:  return self._privacy_guard
+
+    def clear_history(self):
+        self._history = []
+        self._app_memory.clear()
+        self._lesson_steps = []
+        self._lesson_step_idx = 0
+
+    # ── Attached documents (drag-drop on panel) ──────────────────────────────
+
+    def attach_document(self, path: str) -> bool:
+        text = pdf_context.extract_text(path)
+        if not text.strip():
+            return False
+        from pathlib import Path
+        self._attached_docs.append((Path(path).name, text))
+        # Cap context — most recent 3 docs
+        self._attached_docs = self._attached_docs[-3:]
+        return True
+
+    def clear_attachments(self):
+        self._attached_docs = []
+
+    # ── Lesson recording ─────────────────────────────────────────────────────
+
+    def start_recording(self) -> Optional[str]:
+        if self._recorder is None:
+            self._recorder = lesson_recorder.LessonRecorder()
+        out = self._recorder.start()
+        if out:
+            self.sig_recording_state.emit(True, str(out))
+            return str(out)
+        return None
+
+    def stop_recording(self) -> Optional[str]:
+        if not self._recorder or not self._recorder.is_recording:
+            return None
+        out = self._recorder.stop()
+        self.sig_recording_state.emit(False, str(out) if out else "")
+        return str(out) if out else None
+
+    @property
+    def is_recording(self) -> bool:
+        return bool(self._recorder and self._recorder.is_recording)
+
