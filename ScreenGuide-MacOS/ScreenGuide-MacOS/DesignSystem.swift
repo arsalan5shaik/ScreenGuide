@@ -315,3 +315,58 @@ struct DSPrimaryButtonStyle: ButtonStyle {
                     }
                 }
 
+                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+    }
+
+    private func buttonBackgroundColor(isPressed: Bool) -> Color {
+        if isPressed {
+            // Pressed: brighten slightly beyond hover
+            return DS.Colors.accentHover.blendedWithWhite(fraction: DS.StateLayer.pressed)
+        } else if isHovered {
+            return DS.Colors.accentHover
+        } else {
+            return DS.Colors.accent
+        }
+    }
+}
+
+/// Secondary button — supporting actions, less visual weight than primary.
+/// Surface-colored background with primary text. Used for: action buttons
+/// (download, open link), embedded element buttons.
+struct DSSecondaryButtonStyle: ButtonStyle {
+    var isFullWidth: Bool = true
+
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 16, weight: .medium))
+            .foregroundColor(DS.Colors.textPrimary)
+            .frame(maxWidth: isFullWidth ? .infinity : nil)
+            .padding(.vertical, 12)
+            .padding(.horizontal, isFullWidth ? 0 : 16)
+            .background(
+                Capsule()
+                    .fill(buttonBackgroundColor(isPressed: configuration.isPressed))
+            )
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.easeOut(duration: DS.Animation.fast), value: configuration.isPressed)
+            .animation(.easeOut(duration: DS.Animation.fast), value: isHovered)
+            .onHover { hovering in
+                isHovered = hovering
+                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+    }
+
+    private func buttonBackgroundColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return DS.Colors.surface4
+        } else if isHovered {
+            return DS.Colors.surface3
+        } else {
+            return DS.Colors.surface2
+        }
+    }
+}
+
