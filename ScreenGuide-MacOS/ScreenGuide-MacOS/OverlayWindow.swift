@@ -834,3 +834,48 @@ class OverlayWindowManager {
         })
     }
 
+    func isShowingOverlay() -> Bool {
+        return !overlayWindows.isEmpty
+    }
+}
+
+// MARK: - Onboarding Video Player
+
+/// NSViewRepresentable wrapping an AVPlayerLayer so HLS video plays
+/// inside SwiftUI. Uses a custom NSView subclass to keep the player
+/// layer sized to the view's bounds automatically.
+private struct OnboardingVideoPlayerView: NSViewRepresentable {
+    let player: AVPlayer?
+
+    func makeNSView(context: Context) -> AVPlayerNSView {
+        let view = AVPlayerNSView()
+        view.player = player
+        return view
+    }
+
+    func updateNSView(_ nsView: AVPlayerNSView, context: Context) {
+        nsView.player = player
+    }
+}
+
+private class AVPlayerNSView: NSView {
+    var player: AVPlayer? {
+        didSet { playerLayer.player = player }
+    }
+
+    private let playerLayer = AVPlayerLayer()
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        playerLayer.videoGravity = .resizeAspectFill
+        layer?.addSublayer(playerLayer)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        playerLayer.frame = bounds
+    }
+}
