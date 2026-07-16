@@ -370,3 +370,54 @@ struct DSSecondaryButtonStyle: ButtonStyle {
     }
 }
 
+/// Tertiary/ghost button — low-emphasis actions with subtle hover background.
+/// Transparent at rest, shows surface fill on hover. Used for: navigation
+/// links, sidebar items, medium-low emphasis actions.
+struct DSTertiaryButtonStyle: ButtonStyle {
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 16, weight: .medium))
+            .foregroundColor(
+                configuration.isPressed
+                    ? DS.Colors.accentHover
+                    : isHovered
+                        ? DS.Colors.accentText
+                        : DS.Colors.textSecondary
+            )
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .background(
+                Capsule()
+                    .fill(buttonBackgroundColor(isPressed: configuration.isPressed))
+            )
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.easeOut(duration: DS.Animation.fast), value: configuration.isPressed)
+            .animation(.easeOut(duration: DS.Animation.fast), value: isHovered)
+            .onHover { hovering in
+                isHovered = hovering
+                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+    }
+
+    private func buttonBackgroundColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return DS.Colors.surface3
+        } else if isHovered {
+            return DS.Colors.surface2
+        } else {
+            return Color.clear
+        }
+    }
+}
+
+/// Text button — the lowest-emphasis button style. No background on any
+/// state, not even hover. Only the text color changes. Used for: "restart",
+/// "skip", "cancel", and other truly minimal inline actions where a
+/// background would add too much visual weight.
+struct DSTextButtonStyle: ButtonStyle {
+    var fontSize: CGFloat = 14
+
+    @State private var isHovered = false
+
