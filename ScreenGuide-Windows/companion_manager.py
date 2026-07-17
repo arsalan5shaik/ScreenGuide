@@ -1483,3 +1483,53 @@ class CompanionManager(QObject):
     def is_recording(self) -> bool:
         return bool(self._recorder and self._recorder.is_recording)
 
+    # ── Workflow capture (record clicks/keystrokes) ──────────────────────────
+
+    def workflow_start(self) -> bool:
+        if self._workflow is None:
+            self._workflow = workflow_capture.WorkflowCapture()
+        return self._workflow.start()
+
+    def workflow_stop(self) -> str:
+        if not self._workflow:
+            return ""
+        events = self._workflow.stop()
+        return self._workflow.summarise() if events else ""
+
+    # ── Live collaboration ───────────────────────────────────────────────────
+
+    def collab_start_host(self):
+        """Live-session host. Disabled — see tutor_features/collab.py."""
+        self.sig_error.emit(
+            "Live Session: not available in this build. "
+            "Requires a WebRTC signalling server (planned for a future release)."
+        )
+
+    def collab_join(self, code: str):
+        """Live-session join. Disabled — see tutor_features/collab.py."""
+        self.sig_error.emit(
+            "Live Session: not available in this build. "
+            "Requires a WebRTC signalling server (planned for a future release)."
+        )
+
+    # ── Voice picker (ElevenLabs / Edge) ─────────────────────────────────────
+
+    def set_tts_voice(self, voice: str):
+        try:
+            tts = self._get_tts()
+            if hasattr(tts, "set_voice"):
+                tts.set_voice(voice)
+        except Exception:
+            pass
+
+    # ── Toggle setters for the rest of the new features ──────────────────────
+
+    def set_code_mode_auto(self, enabled: bool):
+        self._code_mode_auto = enabled
+
+    def set_multilang(self, enabled: bool):
+        self._multilang = enabled
+
+    def set_journal(self, enabled: bool):
+        self._journal_enabled = enabled
+
