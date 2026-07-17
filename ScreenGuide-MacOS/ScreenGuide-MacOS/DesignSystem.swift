@@ -421,3 +421,56 @@ struct DSTextButtonStyle: ButtonStyle {
 
     @State private var isHovered = false
 
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: fontSize, weight: .medium))
+            .foregroundColor(
+                configuration.isPressed
+                    ? DS.Colors.textPrimary
+                    : isHovered
+                        ? DS.Colors.textPrimary
+                        : DS.Colors.textTertiary
+            )
+            .animation(.easeOut(duration: DS.Animation.fast), value: configuration.isPressed)
+            .animation(.easeOut(duration: DS.Animation.fast), value: isHovered)
+            .onHover { hovering in
+                isHovered = hovering
+                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+    }
+}
+
+/// Outlined button — medium emphasis, used where a border helps define
+/// the button's bounds. Used for: display selector, copy prompt.
+struct DSOutlinedButtonStyle: ButtonStyle {
+    var isFullWidth: Bool = true
+
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 16, weight: .medium))
+            .foregroundColor(DS.Colors.textPrimary)
+            .frame(maxWidth: isFullWidth ? .infinity : nil)
+            .padding(.vertical, 12)
+            .padding(.horizontal, isFullWidth ? 0 : 16)
+            .background(
+                Capsule()
+                    .fill(buttonBackgroundColor(isPressed: configuration.isPressed))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(
+                        borderColor(isPressed: configuration.isPressed),
+                        lineWidth: 1
+                    )
+            )
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.easeOut(duration: DS.Animation.fast), value: configuration.isPressed)
+            .animation(.easeOut(duration: DS.Animation.fast), value: isHovered)
+            .onHover { hovering in
+                isHovered = hovering
+                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+    }
+
