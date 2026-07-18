@@ -1533,3 +1533,29 @@ class CompanionManager(QObject):
     def set_journal(self, enabled: bool):
         self._journal_enabled = enabled
 
+    def set_ocr_enabled(self, enabled: bool):
+        self._ocr_enabled = enabled
+
+    # ── Stop / cancel ─────────────────────────────────────────────────────────
+
+    def stop(self):
+        """Cancel the current LLM stream + any in-flight TTS. Bound to Esc."""
+        self._cancel_flag = True
+        # Kill audio playback immediately — flips the global stop event so
+        # the chunked PortAudio loop bails out within ~50 ms.
+        try:
+            from audio.playback import stop_audio
+            stop_audio()
+        except Exception:
+            pass
+        # Some TTS providers also have their own cancel hook
+        tts = self._tts
+        if tts and hasattr(tts, "stop"):
+            try:
+                tts.stop()
+            except Exception:
+                pass
+        # Clear any stored lesson so "stop" really means "back to zero"
+        self._lesson_steps = []
+        self._lesson_step_idx = 0
+        self._emit_state(AppState.IDLE)
