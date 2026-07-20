@@ -591,3 +591,57 @@ final class CompanionManager: ObservableObject {
             // Stay in processing (spinner) state — no streaming text displayed
             voiceState = .processing
 
+            do {
+                // Capture all connected screens so the AI has full context
+                let screenCaptures = try await CompanionScreenCaptureUtility.captureAllScreensAsJPEG()
+
+                guard !Task.isCancelled else { return }
+
+                // Build image labels with the actual screenshot pixel dimensions
+                // so Claude's coordinate space matches the image it sees. We
+                // scale from screenshot pixels to display points ourselves.
+                let labeledImages = screenCaptures.map { capture in
+                    let dimensionInfo = " (image dimensions: \(capture.screenshotWidthInPixels)x\(capture.screenshotHeightInPixels) pixels)"
+                    return (data: capture.imageData, label: capture.label + dimensionInfo)
+                }
+
+                // Pass conversation history so Claude remembers prior exchanges
+                let historyForAPI = conversationHistory.map { entry in
+                    (userPlaceholder: entry.userTranscript, assistantResponse: entry.assistantResponse)
+                }
+
+                let (fullResponseText, _) = try await claudeAPI.analyzeImageStreaming(
+                    images: labeledImages,
+                    systemPrompt: Self.companionVoiceResponseSystemPrompt,
+                    conversationHistory: historyForAPI,
+                    userPrompt: transcript,
+                    onTextChunk: { _ in
+                        // No streaming text display — spinner stays until TTS plays
+                    }
+                )
+
+                guard !Task.isCancelled else { return }
+
+                // Parse the [POINT:...] tag from Claude's response
+                let parseResult = Self.parsePointingCoordinates(from: fullResponseText)
+                let spokenText = parseResult.spokenText
+
+                // Handle element pointing if Claude returned coordinates.
+                // Switch to idle BEFORE setting the location so the triangle
+                // becomes visible and can fly to the target. Without this, the
+                // spinner hides the triangle and the flight animation is invisible.
+                let hasPointCoordinate = parseResult.coordinate != nil
+                if hasPointCoordinate {
+                    voiceState = .idle
+                }
+
+                // Pick the screen capture matching Claude's screen number,
+                // falling back to the cursor screen if not specified.
+                let targetScreenCapture: CompanionScreenCapture? = {
+                    if let screenNumber = parseResult.screenNumber,
+                       screenNumber >= 1 && screenNumber <= screenCaptures.count {
+                        return screenCaptures[screenNumber - 1]
+                    }
+                    return screenCaptures.first(where: { $0.isCursorScreen })
+                }()
+
