@@ -474,3 +474,57 @@ struct DSOutlinedButtonStyle: ButtonStyle {
             }
     }
 
+    private func buttonBackgroundColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return DS.Colors.surface3
+        } else if isHovered {
+            return DS.Colors.surface2
+        } else {
+            return DS.Colors.surface1
+        }
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if isPressed || isHovered {
+            return DS.Colors.borderStrong
+        } else {
+            return DS.Colors.borderSubtle
+        }
+    }
+}
+
+/// Destructive button — for dangerous/irreversible actions (close session, delete).
+/// Red-tinted background that intensifies on hover and press.
+struct DSDestructiveButtonStyle: ButtonStyle {
+    @State private var isHovered = false
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 16, weight: .medium))
+            .foregroundColor(
+                isHovered || configuration.isPressed
+                    ? .white
+                    : DS.Colors.destructiveText
+            )
+            .padding(.vertical, 10)
+            .padding(.horizontal, 16)
+            .background(
+                Capsule()
+                    .fill(buttonBackgroundColor(isPressed: configuration.isPressed))
+            )
+            .overlay(
+                Capsule()
+                    .stroke(
+                        borderColor(isPressed: configuration.isPressed),
+                        lineWidth: 1
+                    )
+            )
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .animation(.easeOut(duration: DS.Animation.fast), value: configuration.isPressed)
+            .animation(.easeOut(duration: DS.Animation.fast), value: isHovered)
+            .onHover { hovering in
+                isHovered = hovering
+                if hovering { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+            }
+    }
+
