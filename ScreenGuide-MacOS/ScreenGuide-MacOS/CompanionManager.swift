@@ -645,3 +645,53 @@ final class CompanionManager: ObservableObject {
                     return screenCaptures.first(where: { $0.isCursorScreen })
                 }()
 
+                if let pointCoordinate = parseResult.coordinate,
+                   let targetScreenCapture {
+                    // Claude's coordinates are in the screenshot's pixel space
+                    // (top-left origin, e.g. 1280x831). Scale to the display's
+                    // point space (e.g. 1512x982), then convert to AppKit global coords.
+                    let screenshotWidth = CGFloat(targetScreenCapture.screenshotWidthInPixels)
+                    let screenshotHeight = CGFloat(targetScreenCapture.screenshotHeightInPixels)
+                    let displayWidth = CGFloat(targetScreenCapture.displayWidthInPoints)
+                    let displayHeight = CGFloat(targetScreenCapture.displayHeightInPoints)
+                    let displayFrame = targetScreenCapture.displayFrame
+
+                    // Clamp to screenshot coordinate space
+                    let clampedX = max(0, min(pointCoordinate.x, screenshotWidth))
+                    let clampedY = max(0, min(pointCoordinate.y, screenshotHeight))
+
+                    // Scale from screenshot pixels to display points
+                    let displayLocalX = clampedX * (displayWidth / screenshotWidth)
+                    let displayLocalY = clampedY * (displayHeight / screenshotHeight)
+
+                    // Convert from top-left origin (screenshot) to bottom-left origin (AppKit)
+                    let appKitY = displayHeight - displayLocalY
+
+                    // Convert display-local coords to global screen coords
+                    let globalLocation = CGPoint(
+                        x: displayLocalX + displayFrame.origin.x,
+                        y: appKitY + displayFrame.origin.y
+                    )
+
+                    detectedElementScreenLocation = globalLocation
+                    detectedElementDisplayFrame = displayFrame
+                    ScreenGuideAnalytics.trackElementPointed(elementLabel: parseResult.elementLabel)
+                    print("🎯 Element pointing: (\(Int(pointCoordinate.x)), \(Int(pointCoordinate.y))) → \"\(parseResult.elementLabel ?? "element")\"")
+                } else {
+                    print("🎯 Element pointing: \(parseResult.elementLabel ?? "no element")")
+                }
+
+                // Save this exchange to conversation history (with the point tag
+                // stripped so it doesn't confuse future context)
+                conversationHistory.append((
+                    userTranscript: transcript,
+                    assistantResponse: spokenText
+                ))
+
+                // Keep only the last 10 exchanges to avoid unbounded context growth
+                if conversationHistory.count > 10 {
+                    conversationHistory.removeFirst(conversationHistory.count - 10)
+                }
+
+                print("🧠 Conversation history: \(conversationHistory.count) exchanges")
+
