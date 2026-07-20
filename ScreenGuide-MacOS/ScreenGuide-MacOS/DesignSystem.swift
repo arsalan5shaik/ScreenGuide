@@ -528,3 +528,100 @@ struct DSDestructiveButtonStyle: ButtonStyle {
             }
     }
 
+    private func buttonBackgroundColor(isPressed: Bool) -> Color {
+        if isPressed {
+            return DS.Colors.destructive.opacity(0.40)
+        } else if isHovered {
+            return DS.Colors.destructive.opacity(0.30)
+        } else {
+            return DS.Colors.destructive.opacity(0.10)
+        }
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if isPressed || isHovered {
+            return DS.Colors.destructive.opacity(0.40)
+        } else {
+            return DS.Colors.destructive.opacity(0.15)
+        }
+    }
+}
+
+/// Icon-only button — compact circular button for utility actions.
+/// Used for: close button (x), send message, small toolbar actions.
+struct DSIconButtonStyle: ButtonStyle {
+    var size: CGFloat = 28
+    var isDestructiveOnHover: Bool = false
+    var tooltipText: String? = nil
+
+    /// Controls horizontal alignment of the tooltip relative to the button.
+    /// Use `.leading` for buttons near the left edge of the window (tooltip extends right),
+    /// `.trailing` for buttons near the right edge (tooltip extends left),
+    /// and `.center` for buttons in the middle.
+    var tooltipAlignment: Alignment = .center
+
+    @State private var isHovered = false
+    @State private var isTooltipVisible = false
+    @State private var tooltipShowWorkItem: DispatchWorkItem? = nil
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: size * 0.43, weight: .semibold))
+            .foregroundColor(iconColor(isPressed: configuration.isPressed))
+            .frame(width: size, height: size)
+            .background(
+                Circle()
+                    .fill(circleBackgroundColor(isPressed: configuration.isPressed))
+            )
+            .overlay(
+                Circle()
+                    .stroke(circleBorderColor(isPressed: configuration.isPressed), lineWidth: 1)
+            )
+            .scaleEffect(configuration.isPressed ? 0.93 : 1.0)
+            .animation(.easeOut(duration: DS.Animation.fast), value: configuration.isPressed)
+            .animation(.easeOut(duration: DS.Animation.fast), value: isHovered)
+            .contentShape(Circle())
+            // Cursor change via AppKit cursor rects — more reliable than NSCursor.push/pop
+            // because cursor rects are managed at the window level and don't conflict
+            // with SwiftUI's internal cursor handling.
+            .overlay(PointerCursorView())
+            .onHover { hovering in
+                isHovered = hovering
+                // Show the tooltip after a delay (like native tooltips), hide immediately
+                tooltipShowWorkItem?.cancel()
+                if hovering {
+                    let workItem = DispatchWorkItem {
+                        withAnimation(.easeOut(duration: 0.15)) {
+                            isTooltipVisible = true
+                        }
+                    }
+                    tooltipShowWorkItem = workItem
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: workItem)
+                } else {
+                    withAnimation(.easeOut(duration: 0.1)) {
+                        isTooltipVisible = false
+                    }
+                }
+            }
+            // Custom styled tooltip — positioned above the button with enough gap
+            // to not overlap the button. Horizontally aligned based on tooltipAlignment
+            // so tooltips near window edges don't clip outside the visible area.
+            // Uses .allowsHitTesting(false) so the tooltip doesn't interfere
+            // with the button's hover state.
+            .overlay(
+                Group {
+                    if isTooltipVisible, let text = tooltipText, !text.isEmpty {
+                        Text(text)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(DS.Colors.textSecondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(DS.Colors.surface3.opacity(0.85))
+                            )
+                            .overlay(
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.white.opacity(0.20), lineWidth: 0.8)
+
