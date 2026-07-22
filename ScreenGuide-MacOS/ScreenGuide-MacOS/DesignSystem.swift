@@ -625,3 +625,62 @@ struct DSIconButtonStyle: ButtonStyle {
                                     RoundedRectangle(cornerRadius: 6)
                                         .stroke(Color.white.opacity(0.20), lineWidth: 0.8)
 
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .trim(from: 0, to: 0.5)
+                                        .stroke(
+                                            LinearGradient(
+                                                colors: [
+                                                    Color.white.opacity(0.10),
+                                                    Color.white.opacity(0.02)
+                                                ],
+                                                startPoint: .top,
+                                                endPoint: .bottom
+                                            ),
+                                            lineWidth: 0.8
+                                        )
+                                }
+                            )
+                            .shadow(color: Color.black.opacity(0.42), radius: 14, x: 0, y: 8)
+                            .shadow(color: Color.black.opacity(0.26), radius: 4, x: 0, y: 2)
+                            .fixedSize()
+                            .offset(y: -(size / 2 + 20))
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                    }
+                },
+                alignment: tooltipAlignment
+            )
+    }
+
+    private func iconColor(isPressed: Bool) -> Color {
+        if isDestructiveOnHover && (isHovered || isPressed) {
+            return .white
+        }
+        if isPressed {
+            return DS.Colors.textPrimary
+        } else if isHovered {
+            return DS.Colors.textPrimary
+        } else {
+            return DS.Colors.textSecondary
+        }
+    }
+
+    private func circleBackgroundColor(isPressed: Bool) -> Color {
+        if isDestructiveOnHover {
+            if isPressed {
+                return DS.Colors.destructive.opacity(0.40)
+            } else if isHovered {
+                return DS.Colors.destructive.opacity(0.30)
+            } else {
+                return DS.Colors.surface2
+            }
+        }
+        if isPressed {
+            return DS.Colors.surface4
+        } else if isHovered {
+            return DS.Colors.surface3
+        } else {
+            return DS.Colors.surface2
+        }
+    }
+
