@@ -695,3 +695,55 @@ final class CompanionManager: ObservableObject {
 
                 print("🧠 Conversation history: \(conversationHistory.count) exchanges")
 
+                ScreenGuideAnalytics.trackAIResponseReceived(response: spokenText)
+
+                // Play the response via TTS. Keep the spinner (processing state)
+                // until the audio actually starts playing, then switch to responding.
+                if !spokenText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    do {
+                        try await elevenLabsTTSClient.speakText(spokenText)
+                        // speakText returns after player.play() — audio is now playing
+                        voiceState = .responding
+                    } catch {
+                        ScreenGuideAnalytics.trackTTSError(error: error.localizedDescription)
+                        print("⚠️ ElevenLabs TTS error: \(error)")
+                        speakCreditsErrorFallback()
+                    }
+                }
+            } catch is CancellationError {
+                // User spoke again — response was interrupted
+            } catch {
+                ScreenGuideAnalytics.trackResponseError(error: error.localizedDescription)
+                print("⚠️ Companion response error: \(error)")
+                speakCreditsErrorFallback()
+            }
+
+            if !Task.isCancelled {
+                voiceState = .idle
+                scheduleTransientHideIfNeeded()
+            }
+        }
+    }
+
+    /// If the cursor is in transient mode (user toggled "Show ScreenGuide" off),
+    /// waits for TTS playback and any pointing animation to finish, then
+    /// fades out the overlay after a 1-second pause. Cancelled automatically
+    /// if the user starts another push-to-talk interaction.
+    private func scheduleTransientHideIfNeeded() {
+        guard !isScreenGuideCursorEnabled && isOverlayVisible else { return }
+
+        transientHideTask?.cancel()
+        transientHideTask = Task {
+            // Wait for TTS audio to finish playing
+            while elevenLabsTTSClient.isPlaying {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard !Task.isCancelled else { return }
+            }
+
+            // Wait for pointing animation to finish (location is cleared
+            // when the buddy flies back to the cursor)
+            while detectedElementScreenLocation != nil {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard !Task.isCancelled else { return }
+            }
+
