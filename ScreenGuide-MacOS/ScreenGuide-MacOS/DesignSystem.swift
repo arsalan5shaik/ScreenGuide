@@ -736,3 +736,53 @@ extension View {
         self.buttonStyle(DSIconButtonStyle(size: size, isDestructiveOnHover: isDestructiveOnHover, tooltipText: tooltip, tooltipAlignment: tooltipAlignment))
     }
 
+    /// Attaches the shared pointing-hand cursor treatment used across interactive controls.
+    /// Disabled controls can opt out so they keep the default arrow cursor.
+    func pointerCursor(isEnabled: Bool = true) -> some View {
+        self.overlay {
+            if isEnabled {
+                PointerCursorView()
+            }
+        }
+    }
+}
+
+// MARK: - Buddy Composer Visual Style
+
+enum BuddyComposerVisualStyle {
+    static let waveformLeadingColor = Color(hex: "#F3FBFF")
+    static let waveformTrailingColor = Color(hex: "#8FD2FF")
+    static let waveformGlowColor = Color(hex: "#AEE3FF")
+}
+
+// MARK: - Pointer Cursor (AppKit Bridge)
+
+/// Uses AppKit's cursor rect system to reliably show a pointing hand cursor.
+/// More reliable than NSCursor.push()/pop() inside SwiftUI's .onHover because
+/// cursor rects are managed at the window level and don't conflict with
+/// SwiftUI's internal cursor handling.
+private class PointerCursorNSView: NSView {
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return nil
+    }
+}
+
+private struct PointerCursorView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        return PointerCursorNSView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // Invalidate cursor rects when the view updates (e.g., resizes)
+        // so AppKit recalculates the cursor area.
+        nsView.window?.invalidateCursorRects(for: nsView)
+    }
+}
+
+// MARK: - I-Beam Cursor (AppKit Bridge)
+
