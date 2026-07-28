@@ -859,3 +859,70 @@ final class CompanionManager: ObservableObject {
             self?.performOnboardingDemoInteraction()
         }
 
+        // Fade out and clean up when the video finishes
+        onboardingVideoEndObserver = NotificationCenter.default.addObserver(
+            forName: AVPlayerItem.didPlayToEndTimeNotification,
+            object: player.currentItem,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            ScreenGuideAnalytics.trackOnboardingVideoCompleted()
+            self.onboardingVideoOpacity = 0.0
+            // Wait for the 2s fade-out animation to complete before tearing down
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                self.tearDownOnboardingVideo()
+                // After the video disappears, stream in the prompt to try talking
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    self.startOnboardingPromptStream()
+                }
+            }
+        }
+    }
+
+    func tearDownOnboardingVideo() {
+        showOnboardingVideo = false
+        if let timeObserver = onboardingDemoTimeObserver {
+            onboardingVideoPlayer?.removeTimeObserver(timeObserver)
+            onboardingDemoTimeObserver = nil
+        }
+        onboardingVideoPlayer?.pause()
+        onboardingVideoPlayer = nil
+        if let observer = onboardingVideoEndObserver {
+            NotificationCenter.default.removeObserver(observer)
+            onboardingVideoEndObserver = nil
+        }
+    }
+
+    private func startOnboardingPromptStream() {
+        let message = "press control + option and introduce yourself"
+        onboardingPromptText = ""
+        showOnboardingPrompt = true
+        onboardingPromptOpacity = 0.0
+
+        withAnimation(.easeIn(duration: 0.4)) {
+            onboardingPromptOpacity = 1.0
+        }
+
+        var currentIndex = 0
+        Timer.scheduledTimer(withTimeInterval: 0.03, repeats: true) { timer in
+            guard currentIndex < message.count else {
+                timer.invalidate()
+                // Auto-dismiss after 10 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) {
+                    guard self.showOnboardingPrompt else { return }
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        self.onboardingPromptOpacity = 0.0
+                    }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        self.showOnboardingPrompt = false
+                        self.onboardingPromptText = ""
+                    }
+                }
+                return
+            }
+            let index = message.index(message.startIndex, offsetBy: currentIndex)
+            self.onboardingPromptText.append(message[index])
+            currentIndex += 1
+        }
+    }
+
