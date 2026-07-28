@@ -786,3 +786,53 @@ private struct PointerCursorView: NSViewRepresentable {
 
 // MARK: - I-Beam Cursor (AppKit Bridge)
 
+/// Uses AppKit's cursor rect system to reliably show an I-beam (text selection) cursor.
+/// Same approach as PointerCursorView — cursor rects are managed at the window level
+/// and don't conflict with SwiftUI's internal cursor handling.
+/// Unlike NSCursor.push()/pop() in .onHover, this avoids cursor stack imbalance
+/// when the mouse moves quickly between views.
+private class IBeamCursorNSView: NSView {
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .iBeam)
+    }
+
+    /// Pass through all mouse events so the TextField underneath still receives
+    /// focus, clicks, and text selection. Cursor rects are registered with the
+    /// window (via resetCursorRects) and work independently of hit testing.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return nil
+    }
+}
+
+struct IBeamCursorView: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        return IBeamCursorNSView()
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        // Invalidate cursor rects when the view updates (e.g., resizes)
+        // so AppKit recalculates the cursor area.
+        nsView.window?.invalidateCursorRects(for: nsView)
+    }
+}
+
+// MARK: - Native Tooltip
+
+/// Uses AppKit's `NSView.toolTip` to show a tooltip on hover.
+/// SwiftUI's `.help()` conflicts with `.onHover` tracking areas, so
+/// this bridges directly to AppKit's tooltip system which works independently.
+private struct NativeTooltipView: NSViewRepresentable {
+    let tooltip: String
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        view.toolTip = tooltip
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        nsView.toolTip = tooltip
+    }
+}
+
