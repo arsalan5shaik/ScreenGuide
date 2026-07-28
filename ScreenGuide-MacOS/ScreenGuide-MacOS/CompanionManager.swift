@@ -804,3 +804,58 @@ final class CompanionManager: ObservableObject {
             return PointingParseResult(spokenText: spokenText, coordinate: nil, elementLabel: "none", screenNumber: nil)
         }
 
+        var elementLabel: String? = nil
+        if match.numberOfRanges >= 4, let labelRange = Range(match.range(at: 3), in: responseText) {
+            elementLabel = String(responseText[labelRange]).trimmingCharacters(in: .whitespaces)
+        }
+
+        var screenNumber: Int? = nil
+        if match.numberOfRanges >= 5, let screenRange = Range(match.range(at: 4), in: responseText) {
+            screenNumber = Int(responseText[screenRange])
+        }
+
+        return PointingParseResult(
+            spokenText: spokenText,
+            coordinate: CGPoint(x: x, y: y),
+            elementLabel: elementLabel,
+            screenNumber: screenNumber
+        )
+    }
+
+    // MARK: - Onboarding Video
+
+    /// Sets up the onboarding video player, starts playback, and schedules
+    /// the demo interaction at 40s. Called by BlueCursorView when onboarding starts.
+    func setupOnboardingVideo() {
+        guard let videoURL = URL(string: "https://stream.mux.com/e5jB8UuSrtFABVnTHCR7k3sIsmcUHCyhtLu1tzqLlfs.m3u8") else { return }
+
+        let player = AVPlayer(url: videoURL)
+        player.isMuted = false
+        player.volume = 0.0
+        self.onboardingVideoPlayer = player
+        self.showOnboardingVideo = true
+        self.onboardingVideoOpacity = 0.0
+
+        // Start playback immediately — the video plays while invisible,
+        // then we fade in both the visual and audio over 1s.
+        player.play()
+
+        // Wait for SwiftUI to mount the view, then set opacity to 1.
+        // The .animation modifier on the view handles the actual animation.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            self.onboardingVideoOpacity = 1.0
+            // Fade audio volume from 0 → 1 over 2s to match visual fade
+            self.fadeInVideoAudio(player: player, targetVolume: 1.0, duration: 2.0)
+        }
+
+        // At 40 seconds into the video, trigger the onboarding demo where
+        // ScreenGuide flies to something interesting on screen and comments on it
+        let demoTriggerTime = CMTime(seconds: 40, preferredTimescale: 600)
+        onboardingDemoTimeObserver = player.addBoundaryTimeObserver(
+            forTimes: [NSValue(time: demoTriggerTime)],
+            queue: .main
+        ) { [weak self] in
+            ScreenGuideAnalytics.trackOnboardingDemoTriggered()
+            self?.performOnboardingDemoInteraction()
+        }
+
