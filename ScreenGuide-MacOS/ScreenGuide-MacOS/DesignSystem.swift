@@ -836,3 +836,45 @@ private struct NativeTooltipView: NSViewRepresentable {
     }
 }
 
+extension View {
+    /// Attaches a native macOS tooltip that works even alongside `.onHover`.
+    func nativeTooltip(_ text: String?) -> some View {
+        if let text = text, !text.isEmpty {
+            return AnyView(self.overlay(NativeTooltipView(tooltip: text)))
+        } else {
+            return AnyView(self)
+        }
+    }
+}
+
+// MARK: - Color Utilities
+
+extension Color {
+    /// Create a Color from a hex string like "#FF5733" or "FF5733".
+    init(hex: String) {
+        let hexSanitized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "#", with: "")
+
+        var rgbValue: UInt64 = 0
+        Scanner(string: hexSanitized).scanHexInt64(&rgbValue)
+
+        let red = Double((rgbValue & 0xFF0000) >> 16) / 255.0
+        let green = Double((rgbValue & 0x00FF00) >> 8) / 255.0
+        let blue = Double(rgbValue & 0x0000FF) / 255.0
+
+        self.init(red: red, green: green, blue: blue)
+    }
+
+    /// Returns a lighter version of this color by blending toward white.
+    /// `fraction` is 0.0 (no change) to 1.0 (pure white).
+    func blendedWithWhite(fraction: Double) -> Color {
+        // Convert to NSColor to access RGB components for blending
+        guard let nsColor = NSColor(self).usingColorSpace(.sRGB) else { return self }
+
+        let red = nsColor.redComponent + (1.0 - nsColor.redComponent) * fraction
+        let green = nsColor.greenComponent + (1.0 - nsColor.greenComponent) * fraction
+        let blue = nsColor.blueComponent + (1.0 - nsColor.blueComponent) * fraction
+
+        return Color(red: red, green: green, blue: blue)
+    }
+}
