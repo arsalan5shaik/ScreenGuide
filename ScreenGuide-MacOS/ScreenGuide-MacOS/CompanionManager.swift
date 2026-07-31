@@ -979,3 +979,48 @@ final class CompanionManager: ObservableObject {
                     return
                 }
 
+                let dimensionInfo = " (image dimensions: \(cursorScreenCapture.screenshotWidthInPixels)x\(cursorScreenCapture.screenshotHeightInPixels) pixels)"
+                let labeledImages = [(data: cursorScreenCapture.imageData, label: cursorScreenCapture.label + dimensionInfo)]
+
+                let (fullResponseText, _) = try await claudeAPI.analyzeImageStreaming(
+                    images: labeledImages,
+                    systemPrompt: Self.onboardingDemoSystemPrompt,
+                    userPrompt: "look around my screen and find something interesting to point at",
+                    onTextChunk: { _ in }
+                )
+
+                let parseResult = Self.parsePointingCoordinates(from: fullResponseText)
+
+                guard let pointCoordinate = parseResult.coordinate else {
+                    print("🎯 Onboarding demo: no element to point at")
+                    return
+                }
+
+                let screenshotWidth = CGFloat(cursorScreenCapture.screenshotWidthInPixels)
+                let screenshotHeight = CGFloat(cursorScreenCapture.screenshotHeightInPixels)
+                let displayWidth = CGFloat(cursorScreenCapture.displayWidthInPoints)
+                let displayHeight = CGFloat(cursorScreenCapture.displayHeightInPoints)
+                let displayFrame = cursorScreenCapture.displayFrame
+
+                let clampedX = max(0, min(pointCoordinate.x, screenshotWidth))
+                let clampedY = max(0, min(pointCoordinate.y, screenshotHeight))
+                let displayLocalX = clampedX * (displayWidth / screenshotWidth)
+                let displayLocalY = clampedY * (displayHeight / screenshotHeight)
+                let appKitY = displayHeight - displayLocalY
+                let globalLocation = CGPoint(
+                    x: displayLocalX + displayFrame.origin.x,
+                    y: appKitY + displayFrame.origin.y
+                )
+
+                // Set custom bubble text so the pointing animation uses Claude's
+                // comment instead of a random phrase
+                detectedElementBubbleText = parseResult.spokenText
+                detectedElementScreenLocation = globalLocation
+                detectedElementDisplayFrame = displayFrame
+                print("🎯 Onboarding demo: pointing at \"\(parseResult.elementLabel ?? "element")\" — \"\(parseResult.spokenText)\"")
+            } catch {
+                print("⚠️ Onboarding demo error: \(error)")
+            }
+        }
+    }
+}
