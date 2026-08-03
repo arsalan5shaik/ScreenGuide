@@ -96,12 +96,25 @@ class WaveformWidget(QWidget):
 
 
 PROVIDER_LABELS = {
-    "claude":  "Claude",
-    "openai":  "GPT-4o",
-    "gemini":  "Gemini",
-    "copilot": "Copilot",
-    "ollama":  f"Ollama ({cfg.ollama_model})",
+    "claude":   "Claude",
+    "openai":   "GPT-4o",
+    "gemini":   "Gemini",
+    "copilot":  "Copilot",
+    "ollama":   "Ollama",
+    "lmstudio": "LM Studio",
 }
+
+
+def provider_label(provider: str) -> str:
+    """Badge text for a provider. Ollama/LM Studio append the live model name
+    so the badge never claims a model the app isn't actually running — read
+    at call time, not import time, since both are switchable from the tray."""
+    base = PROVIDER_LABELS.get(provider, provider)
+    if provider == "ollama":
+        return f"{base} ({cfg.get_ollama_model('vision')})"
+    if provider == "lmstudio":
+        return f"{base} ({cfg.lmstudio_model})" if cfg.lmstudio_model else base
+    return base
 
 # Provider model lists are fetched live from each vendor's /models endpoint
 # (see ai/model_registry.py for Claude/OpenAI/Gemini and
@@ -139,7 +152,7 @@ class ProviderBadge(QLabel):
         )
 
     def set_provider(self, provider: str):
-        self.setText(PROVIDER_LABELS.get(provider, provider))
+        self.setText(provider_label(provider))
 
 
 class CompanionPanel(QWidget):
@@ -301,8 +314,21 @@ class CompanionPanel(QWidget):
                     self._model_combo.addItem(label, userData=m["id"])
             except Exception:
                 self._model_combo.addItem("default", userData="default")
+        elif provider == "lmstudio":
+            self._model_combo.addItem(
+                cfg.lmstudio_model or "Auto — whatever's loaded",
+                userData=cfg.lmstudio_model,
+            )
         else:   # ollama
-            self._model_combo.addItem(cfg.ollama_model, userData=cfg.ollama_model)
+            # Default to auto so OllamaProvider keeps choosing the vision slot
+            # for screenshot turns and the text slot otherwise. Pinning a single
+            # model here would force one of them onto both kinds of query.
+            vis = cfg.get_ollama_model("vision")
+            txt = cfg.get_ollama_model("text")
+            self._model_combo.addItem(f"Auto — {vis} / {txt}", userData="")
+            for name in dict.fromkeys((vis, txt)):
+                if name:
+                    self._model_combo.addItem(f"Pin to {name}", userData=name)
         self._model_combo.blockSignals(False)
         # Fire once with the new default model id (NOT the display label) so
         # the manager picks it up — important when label != id.
