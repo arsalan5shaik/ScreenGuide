@@ -19,9 +19,19 @@ class MicCapture:
         self,
         on_audio_chunk: Callable[[bytes], None],
         on_level: Callable[[float], None],
+        device: Optional[int] = None,
     ):
         self._on_chunk = on_audio_chunk
         self._on_level = on_level
+        # None = system default input. Defaults to the configured device so
+        # MIC_DEVICE_INDEX applies here too, not just in AmbientListener.
+        if device is None:
+            try:
+                from config import cfg
+                device = cfg.mic_device_index
+            except Exception:
+                device = None
+        self._device = device
         self._stream: Optional[sd.InputStream] = None
         self._running = False
 
@@ -35,6 +45,7 @@ class MicCapture:
             dtype="int16",
             blocksize=BLOCK_SIZE,
             callback=self._callback,
+            device=self._device,
         )
         self._stream.start()
 

@@ -33,12 +33,15 @@ SILENCE_BLOCKS_END = 20              # ~600ms of silence ends a segment
 MAX_SEGMENT_BLOCKS = 120             # ~3.6s max wake-word segment
 PRE_ROLL_BLOCKS    = 18              # ~540ms of pre-roll for the wake word
 
-# Wake phrases — whisper tiny often mis-transcribes "screenguide" so we cover variants
+# Wake phrases — whisper tiny mis-transcribes "screenguide" fairly often, so a
+# few near-misses are included. Deliberately NOT included: bare "click"-family
+# variants ("click me", "clickie", ...) left over from an older product name.
+# In a screen-tutoring app the user says "click" constantly while describing
+# what they're doing, and those fired the wake word mid-sentence.
 WAKE_WORDS = (
-    "screenguide", "click e", "click he", "click me", "clickie", "clicki",
-    "cliki", "klicki", "klicky", "kilicky", "clickey", "clickity",
-    "hey screenguide", "hi screenguide", "hey click", "ok screenguide", "yo screenguide",
-    "hey clicki", "hey klicki", "hey clickie",
+    "screenguide", "screen guide", "screenguid", "scren guide", "screengide",
+    "hey screenguide", "hi screenguide", "ok screenguide", "yo screenguide",
+    "hey screen guide", "ok screen guide",
 )
 
 
