@@ -285,6 +285,9 @@ class CompanionManager(QObject):
         # Current in-flight generation — tracked so Esc / stop can cancel
         self._current_task: Optional[asyncio.Future] = None
         self._cancel_flag = False
+        # Most recent mic RMS, fed by _handle_level — drives silence detection
+        # for wake-word capture and the idle input meter.
+        self._last_rms = 0.0
 
         # Per-app memory: { window_title: [Message, ...] }
         self._app_memory: dict[str, List[Message]] = {}
@@ -512,6 +515,10 @@ class CompanionManager(QObject):
         self._submit(self._auto_stop_after_pause())
 
     def _handle_level(self, rms: float):
+        # Cached for _auto_stop_after_pause's silence detection. Written from
+        # the audio thread, read from the asyncio loop — a float assignment is
+        # atomic under the GIL, so no lock needed.
+        self._last_rms = rms
         try:
             self.sig_audio_level.emit(rms)
         except Exception:
@@ -533,14 +540,44 @@ class CompanionManager(QObject):
         self._emit_state(AppState.LISTENING)
 
     async def _auto_stop_after_pause(self):
-        """When triggered by wake word, wait for user to finish speaking."""
+        """When triggered by wake word, end capture once the user stops talking.
+
+        Previously this just slept until a fixed 10s cap — nothing ever flipped
+        the state early, so *every* wake-word query paid the full 10 seconds
+        before it was even transcribed. Now it endpoints on silence, the same
+        way AmbientListener segments wake-word audio.
+        """
         import time
-        max_total_s = 10.0
+        from audio.ambient_listener import ENERGY_THRESHOLD
+
+        tick = 0.05
+        lead_in_s = 3.0      # how long to wait for speech to begin at all
+        trail_s   = 0.9      # silence after speech that ends the utterance
+        max_total_s = 20.0   # hard ceiling so a stuck mic can't hang the turn
+
         start_t = time.monotonic()
+        speech_started = False
+        silent_since: float | None = None
+
         while self._state == AppState.LISTENING:
-            await asyncio.sleep(0.15)
-            if time.monotonic() - start_t > max_total_s:
+            await asyncio.sleep(tick)
+            now = time.monotonic()
+            loud = self._last_rms > ENERGY_THRESHOLD
+
+            if loud:
+                speech_started = True
+                silent_since = None
+            elif speech_started:
+                if silent_since is None:
+                    silent_since = now
+                elif now - silent_since >= trail_s:
+                    break        # user finished talking
+            elif now - start_t > lead_in_s:
+                break            # nothing was ever said — bail early
+
+            if now - start_t > max_total_s:
                 break
+
         await self._end_capture_and_process()
 
     async def _end_capture_and_process(self):
@@ -1241,7 +1278,10 @@ class CompanionManager(QObject):
     # ── Settings ──────────────────────────────────────────────────────────────
 
     def set_model(self, model: str):
-        self._current_model = model
+        # Empty string = "auto" (the Ollama/LM Studio default entry). Store it
+        # as None so providers fall back to their own per-call model choice
+        # instead of being pinned to one model for every kind of query.
+        self._current_model = model or None
 
     def set_active_provider(self, name: str):
         """Runtime switch between claude / openai / copilot / gemini / ollama."""
