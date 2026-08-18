@@ -31,10 +31,11 @@ FONT_TITLE    = font(15, QFont.Weight.Bold)
 FONT_RESPONSE = font(13)
 
 # ── Geometry ──────────────────────────────────────────────────────────────────
-PANEL_WIDTH   = 340
-PANEL_HEIGHT  = 480
+PANEL_WIDTH   = 380
+PANEL_HEIGHT  = 560
 PANEL_RADIUS  = 16
 CURSOR_RADIUS = 18
+BUBBLE_RADIUS = 10
 
 # ── Animation ────────────────────────────────────────────────────────────────
 ANIM_FAST_MS  = 150
@@ -92,6 +93,90 @@ QScrollBar:vertical {{
 QScrollBar::handle:vertical {{
     background: rgba(100, 100, 120, 120);
     border-radius: 2px;
+}}
+
+/* ── Conversation bubbles ─────────────────────────────────────────────── */
+QLabel#bubble_user {{
+    background-color: rgba(0, 120, 255, 38);
+    border: 1px solid rgba(0, 120, 255, 90);
+    border-radius: {BUBBLE_RADIUS}px;
+    color: rgb(228, 236, 255);
+    font-size: 13px;
+    padding: 7px 10px;
+}}
+QLabel#bubble_assistant {{
+    background-color: rgba(44, 44, 54, 190);
+    border: 1px solid rgba(70, 70, 88, 150);
+    border-radius: {BUBBLE_RADIUS}px;
+    color: rgb(226, 226, 236);
+    font-size: 13px;
+    padding: 7px 10px;
+}}
+QLabel#bubble_error {{
+    background-color: rgba(255, 70, 70, 26);
+    border: 1px solid rgba(255, 70, 70, 110);
+    border-radius: {BUBBLE_RADIUS}px;
+    color: rgb(255, 176, 176);
+    font-size: 12px;
+    padding: 7px 10px;
+}}
+QLabel#bubble_system {{
+    background: transparent;
+    color: rgb(126, 126, 148);
+    font-size: 11px;
+    padding: 1px 4px;
+}}
+QLabel#bubble_role {{
+    color: rgb(112, 112, 136);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 0px 4px;
+}}
+
+/* ── Composer ─────────────────────────────────────────────────────────── */
+QLineEdit#composer {{
+    background-color: rgba(38, 38, 48, 220);
+    border: 1px solid rgba(70, 70, 88, 170);
+    border-radius: 9px;
+    color: rgb(236, 236, 244);
+    font-size: 13px;
+    padding: 7px 10px;
+    selection-background-color: rgba(0, 120, 255, 140);
+}}
+QLineEdit#composer:focus {{
+    border: 1px solid rgba(0, 120, 255, 190);
+}}
+QLineEdit#composer:disabled {{
+    color: rgb(104, 104, 126);
+}}
+
+QPushButton#icon_btn {{
+    background-color: rgba(52, 52, 64, 190);
+    border: 1px solid rgba(74, 74, 92, 160);
+    border-radius: 9px;
+    color: rgb(224, 224, 234);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 12px;
+}}
+QPushButton#icon_btn:hover {{
+    background-color: rgba(68, 68, 84, 220);
+}}
+QPushButton#icon_btn:disabled {{
+    background-color: rgba(40, 40, 50, 140);
+    color: rgb(96, 96, 116);
+}}
+QPushButton#stop_btn {{
+    background-color: rgba(255, 70, 70, 30);
+    border: 1px solid rgba(255, 70, 70, 150);
+    border-radius: 9px;
+    color: rgb(255, 156, 156);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 12px;
+}}
+QPushButton#stop_btn:hover {{
+    background-color: rgba(255, 70, 70, 60);
 }}
 """
 

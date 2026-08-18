@@ -1,19 +1,18 @@
-import asyncio
+import time
 from enum import Enum, auto
-from typing import Callable, Optional
+from typing import Optional
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QScrollArea, QSizePolicy, QComboBox, QFrame
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QCursor
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QPainter, QPen, QBrush
 
 from ui.design import (
     PANEL_QSS, PANEL_WIDTH, PANEL_HEIGHT, PANEL_RADIUS,
     STATE_IDLE, STATE_LISTENING, STATE_THINKING, STATE_SPEAKING,
-    FONT_TITLE, FONT_STATUS, FONT_RESPONSE, FONT_LABEL,
-    SURFACE, TEXT_SECONDARY, BORDER, ANIM_FAST_MS
+    FONT_TITLE, FONT_STATUS, FONT_LABEL,
 )
 from config import cfg
 
@@ -25,20 +24,22 @@ class AppState(Enum):
     SPEAKING  = auto()
 
 
+BUSY_STATES = (AppState.THINKING, AppState.SPEAKING)
+
+
 def _hotkey_label() -> str:
     """Human-readable hotkey from config, e.g. 'ctrl+win' -> 'Ctrl+Win'."""
     try:
-        from config import cfg
         return "+".join(p.strip().capitalize() for p in cfg.hotkey.split("+"))
     except Exception:
         return "Ctrl+Win"
 
 
 STATE_LABELS = {
-    AppState.IDLE:      f"Say 'ScreenGuide' or {_hotkey_label()}",
-    AppState.LISTENING: "Listening...",
-    AppState.THINKING:  "Thinking...",
-    AppState.SPEAKING:  "Speaking...",
+    AppState.IDLE:      f"Say 'ScreenGuide' or hold {_hotkey_label()}",
+    AppState.LISTENING: "Listening…",
+    AppState.THINKING:  "Thinking…",
+    AppState.SPEAKING:  "Speaking…",
 }
 
 STATE_COLORS = {
@@ -54,7 +55,7 @@ class WaveformWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(36)
+        self.setFixedHeight(32)
         self._levels = [0.0] * 12
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._decay)
@@ -95,6 +96,40 @@ class WaveformWidget(QWidget):
         painter.end()
 
 
+class MicMeter(QWidget):
+    """Thin idle input-level bar.
+
+    Sits under the composer while idle so a muted or wrong input device is
+    obvious *before* the user holds the hotkey and talks to nothing.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(3)
+        self._level = 0.0
+        self._peak = 0.0
+
+    def set_level(self, rms: float):
+        self._level = min(1.0, rms * 6)
+        self._peak = max(self._peak * 0.92, self._level)
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(60, 60, 75, 140)))
+        painter.drawRoundedRect(0, 0, w, h, 1, 1)
+        if self._peak > 0.01:
+            lit = int(w * self._peak)
+            # Green until it's hot, amber near clipping.
+            c = QColor(50, 200, 100, 210) if self._peak < 0.85 else QColor(255, 180, 0, 220)
+            painter.setBrush(QBrush(c))
+            painter.drawRoundedRect(0, 0, lit, h, 1, 1)
+        painter.end()
+
+
 PROVIDER_LABELS = {
     "claude":   "Claude",
     "openai":   "GPT-4o",
@@ -105,16 +140,32 @@ PROVIDER_LABELS = {
 }
 
 
-def provider_label(provider: str) -> str:
+def _short_model(name: str, limit: int = 16) -> str:
+    """Trim a model id to something that fits the badge.
+
+    Character-based rather than pixel-based on purpose: font metrics for a
+    stylesheet-styled QLabel aren't reliable before it's shown, so measuring
+    produced wildly over-eager truncation.
+    """
+    name = (name or "").strip()
+    return name if len(name) <= limit else name[: limit - 1] + "…"
+
+
+def provider_label(provider: str, *, full: bool = False) -> str:
     """Badge text for a provider. Ollama/LM Studio append the live model name
     so the badge never claims a model the app isn't actually running — read
     at call time, not import time, since both are switchable from the tray."""
     base = PROVIDER_LABELS.get(provider, provider)
     if provider == "ollama":
-        return f"{base} ({cfg.get_ollama_model('vision')})"
-    if provider == "lmstudio":
-        return f"{base} ({cfg.lmstudio_model})" if cfg.lmstudio_model else base
-    return base
+        model = cfg.get_ollama_model("vision")
+    elif provider == "lmstudio":
+        model = cfg.lmstudio_model
+    else:
+        return base
+    if not model:
+        return base
+    return f"{base} ({model if full else _short_model(model)})"
+
 
 # Provider model lists are fetched live from each vendor's /models endpoint
 # (see ai/model_registry.py for Claude/OpenAI/Gemini and
@@ -127,32 +178,161 @@ def _copilot_model_choices() -> list[tuple[str, str]]:
     Free models first, then ascending multiplier. Display shows '(free)' /
     '(1×)' so the user always knows what burns premium quota."""
     try:
-        from ai.github_copilot_provider import (
-            cached_models, sorted_model_ids, model_label,
-        )
+        from ai.github_copilot_provider import sorted_model_ids, model_label
     except Exception:
         return [("gpt-4o-mini", "gpt-4o-mini  (free)")]
-    out = []
-    for mid in sorted_model_ids():
-        out.append((mid, model_label(mid)))
+    out = [(mid, model_label(mid)) for mid in sorted_model_ids()]
     if not out:
         out.append(("gpt-4o-mini", "gpt-4o-mini  (free)"))
     return out
 
 
 class ProviderBadge(QLabel):
-    """Small pill showing active provider."""
+    """Small pill showing active provider.
+
+    Text is elided rather than allowed to grow: model ids like
+    'llama3.2-vision:11b' would otherwise push the minimize button off the
+    edge of the header.
+    """
 
     def __init__(self, provider: str, parent=None):
         super().__init__(parent)
-        self.set_provider(provider)
         self.setStyleSheet(
             "background: rgba(0,120,255,25); border: 1px solid rgba(0,120,255,100);"
             "border-radius: 8px; color: rgb(140,180,255); font-size: 11px; padding: 2px 8px;"
         )
+        self.set_provider(provider)
 
     def set_provider(self, provider: str):
         self.setText(provider_label(provider))
+        # Full, untruncated id on hover.
+        self.setToolTip(provider_label(provider, full=True))
+
+
+class ConversationView(QScrollArea):
+    """Scrolling transcript of the session: what the user said, what
+    ScreenGuide answered, and any errors — in order.
+
+    Replaces the previous single append-only QLabel, which never cleared
+    between turns and so grew into one undifferentiated wall of text.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWidgetResizable(True)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+
+        self._host = QWidget()
+        self._host.setStyleSheet("background: transparent;")
+        self._col = QVBoxLayout(self._host)
+        self._col.setContentsMargins(2, 2, 2, 2)
+        self._col.setSpacing(7)
+        self._col.addStretch(1)
+        self.setWidget(self._host)
+
+        self._live: Optional[QLabel] = None   # assistant bubble being streamed
+        self._live_text = ""
+        self._placeholder: Optional[QLabel] = None
+        self._show_placeholder()
+
+    # ── Internals ─────────────────────────────────────────────────────────
+
+    def _near_bottom(self) -> bool:
+        bar = self.verticalScrollBar()
+        return bar.value() >= bar.maximum() - 48
+
+    def _scroll_to_bottom(self):
+        bar = self.verticalScrollBar()
+        QTimer.singleShot(0, lambda: bar.setValue(bar.maximum()))
+
+    def _add(self, text: str, kind: str, *, role: str = "") -> QLabel:
+        stick = self._near_bottom()
+        self._clear_placeholder()
+        if role:
+            cap = QLabel(role)
+            cap.setObjectName("bubble_role")
+            self._col.insertWidget(self._col.count() - 1, cap)
+        bubble = QLabel(text)
+        bubble.setObjectName(f"bubble_{kind}")
+        bubble.setWordWrap(True)
+        bubble.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        bubble.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+        self._col.insertWidget(self._col.count() - 1, bubble)
+        if stick:
+            self._scroll_to_bottom()
+        return bubble
+
+    def _show_placeholder(self):
+        if self._placeholder is not None:
+            return
+        self._placeholder = self._add(
+            f"Ask about anything on your screen.\n"
+            f"Hold {_hotkey_label()} to talk, or type below.",
+            "system",
+        )
+
+    def _clear_placeholder(self):
+        if self._placeholder is not None:
+            self._placeholder.setParent(None)
+            self._placeholder.deleteLater()
+            self._placeholder = None
+
+    # ── Public API ────────────────────────────────────────────────────────
+
+    def add_user(self, text: str):
+        self.end_assistant()
+        self._add(text, "user", role="You")
+
+    def add_error(self, text: str):
+        self.end_assistant()
+        self._add(text, "error", role="Error")
+
+    def add_system(self, text: str):
+        self._add(text, "system")
+
+    def begin_assistant(self):
+        """Open a fresh assistant bubble for the next streamed response."""
+        self.end_assistant()
+        self._live_text = ""
+        self._live = self._add("", "assistant", role="ScreenGuide")
+
+    def append_assistant(self, chunk: str):
+        if self._live is None:
+            self.begin_assistant()
+        stick = self._near_bottom()
+        self._live_text += chunk
+        self._live.setText(self._live_text)
+        if stick:
+            self._scroll_to_bottom()
+
+    def end_assistant(self):
+        """Close the streaming bubble. Drops it if nothing was ever written."""
+        if self._live is not None and not self._live_text.strip():
+            # Nothing streamed (cancelled, or a voice command handled locally)
+            # — remove the empty bubble and its role caption.
+            idx = self._col.indexOf(self._live)
+            self._live.setParent(None)
+            self._live.deleteLater()
+            if idx > 0:
+                cap = self._col.itemAt(idx - 1).widget()
+                if cap is not None and cap.objectName() == "bubble_role":
+                    cap.setParent(None)
+                    cap.deleteLater()
+        self._live = None
+        self._live_text = ""
+
+    def clear(self):
+        while self._col.count() > 1:
+            item = self._col.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        self._live = None
+        self._live_text = ""
+        self._placeholder = None
+        self._show_placeholder()
 
 
 class CompanionPanel(QWidget):
@@ -162,17 +342,27 @@ class CompanionPanel(QWidget):
     on_push_to_talk_released = pyqtSignal()
     on_model_changed         = pyqtSignal(str)
     on_document_dropped      = pyqtSignal(str)
+    on_text_submitted        = pyqtSignal(str)
+    on_stop_clicked          = pyqtSignal()
+    on_retry_clicked         = pyqtSignal()
     _sig_copilot_code        = pyqtSignal(str, str)   # (user_code, verification_uri)
     _sig_copilot_error       = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
         self._state = AppState.IDLE
-        self._response_text = ""
+        self._phase = ""
+        self._busy_since = 0.0
+        self._last_question = ""
         self._setup_window()
         self._build_ui()
         self._position_bottom_right()
-        # Wire internal thread-safe signals → main-thread slots
+
+        # Ticks the elapsed-time readout while a request is in flight.
+        self._elapsed_timer = QTimer(self)
+        self._elapsed_timer.setInterval(100)
+        self._elapsed_timer.timeout.connect(self._refresh_status)
+
         self._sig_copilot_code.connect(self._on_copilot_code)
         self._sig_copilot_error.connect(self._on_copilot_error)
 
@@ -202,21 +392,19 @@ class CompanionPanel(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 18, 18, 18)
-        root.setSpacing(12)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(9)
 
-        # Header
+        # ── Header ──────────────────────────────────────────────────────
         header = QHBoxLayout()
         title = QLabel("ScreenGuide")
         title.setObjectName("title")
         title.setFont(FONT_TITLE)
         header.addWidget(title)
         header.addStretch()
-        provider = cfg.llm_provider()
-        self._badge = ProviderBadge(provider)
+        self._badge = ProviderBadge(cfg.llm_provider())
         header.addWidget(self._badge)
 
-        # Minimize button — hides the panel back to tray
         self._min_btn = QPushButton("—")
         self._min_btn.setFixedSize(24, 24)
         self._min_btn.setStyleSheet(
@@ -229,52 +417,62 @@ class CompanionPanel(QWidget):
         header.addWidget(self._min_btn)
         root.addLayout(header)
 
-        # Divider
         div = QFrame()
         div.setFrameShape(QFrame.Shape.HLine)
         div.setStyleSheet("color: rgba(60,60,75,180);")
         root.addWidget(div)
 
-        # Status row
+        # ── Status row ──────────────────────────────────────────────────
         self._status_dot = QLabel("●")
-        self._status_dot.setStyleSheet(f"color: rgb({STATE_IDLE.red()},{STATE_IDLE.green()},{STATE_IDLE.blue()}); font-size: 10px;")
         self._status_label = QLabel(STATE_LABELS[AppState.IDLE])
         self._status_label.setObjectName("status")
         self._status_label.setFont(FONT_STATUS)
         status_row = QHBoxLayout()
+        status_row.setSpacing(6)
         status_row.addWidget(self._status_dot)
-        status_row.addWidget(self._status_label)
-        status_row.addStretch()
-        root.addLayout(status_row)
+        status_row.addWidget(self._status_label, stretch=1)
 
-        # Waveform
+        # Visible cancel affordance. Esc was already bound, but nothing on
+        # screen said so — a long local-model run just looked frozen.
+        self._stop_btn = QPushButton("Stop")
+        self._stop_btn.setObjectName("stop_btn")
+        self._stop_btn.setToolTip("Cancel this response (Esc)")
+        self._stop_btn.clicked.connect(self.on_stop_clicked.emit)
+        self._stop_btn.setVisible(False)
+        status_row.addWidget(self._stop_btn)
+        root.addLayout(status_row)
+        self._apply_state_color(AppState.IDLE)
+
+        # ── Waveform (listening only) ───────────────────────────────────
         self._waveform = WaveformWidget()
         self._waveform.setVisible(False)
         root.addWidget(self._waveform)
 
-        # Response area
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._response_label = QLabel()
-        self._response_label.setObjectName("response")
-        self._response_label.setFont(FONT_RESPONSE)
-        self._response_label.setWordWrap(True)
-        self._response_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self._response_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self._response_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        scroll.setWidget(self._response_label)
-        root.addWidget(scroll, stretch=1)
+        # ── Conversation ────────────────────────────────────────────────
+        self._convo = ConversationView()
+        root.addWidget(self._convo, stretch=1)
 
-        # Push-to-talk button
-        self._ptt_btn = QPushButton(f"Say 'ScreenGuide' or hold {_hotkey_label()}")
-        self._ptt_btn.setObjectName("hotkey_btn")
-        self._ptt_btn.setFont(FONT_LABEL)
-        self._ptt_btn.setFixedHeight(44)
-        root.addWidget(self._ptt_btn)
+        # ── Composer ────────────────────────────────────────────────────
+        compose = QHBoxLayout()
+        compose.setSpacing(6)
+        self._input = QLineEdit()
+        self._input.setObjectName("composer")
+        self._input.setPlaceholderText("Type a question…")
+        self._input.returnPressed.connect(self._submit_text)
+        compose.addWidget(self._input, stretch=1)
 
-        # Footer: model selector + provider info
+        self._send_btn = QPushButton("Send")
+        self._send_btn.setObjectName("icon_btn")
+        self._send_btn.clicked.connect(self._submit_text)
+        compose.addWidget(self._send_btn)
+        root.addLayout(compose)
+
+        self._meter = MicMeter()
+        root.addWidget(self._meter)
+
+        # ── Footer: model picker + retry ────────────────────────────────
         footer = QHBoxLayout()
+        footer.setSpacing(6)
         lbl = QLabel("Model:")
         lbl.setFont(FONT_LABEL)
         lbl.setStyleSheet("color: rgb(100,100,120); font-size: 11px;")
@@ -284,15 +482,36 @@ class CompanionPanel(QWidget):
             "border-radius: 6px; color: rgb(200,200,215); padding: 2px 6px; font-size: 11px;"
         )
         self._populate_models()
-        # Emit the model id (stored in userData), not the display label
         self._model_combo.currentIndexChanged.connect(
             lambda _idx: self.on_model_changed.emit(
-                self._model_combo.currentData() or self._model_combo.currentText()
+                self._model_combo.currentData() or ""
             )
         )
+        self._retry_btn = QPushButton("Retry")
+        self._retry_btn.setObjectName("icon_btn")
+        self._retry_btn.setToolTip("Ask the last question again")
+        self._retry_btn.clicked.connect(self._retry)
+        self._retry_btn.setEnabled(False)
+
         footer.addWidget(lbl)
         footer.addWidget(self._model_combo, stretch=1)
+        footer.addWidget(self._retry_btn)
         root.addLayout(footer)
+
+    # ── Composer actions ──────────────────────────────────────────────────
+
+    def _submit_text(self):
+        text = self._input.text().strip()
+        if not text or self._state in BUSY_STATES:
+            return
+        self._input.clear()
+        self.on_text_submitted.emit(text)
+
+    def _retry(self):
+        if self._last_question and self._state not in BUSY_STATES:
+            self.on_text_submitted.emit(self._last_question)
+
+    # ── Model dropdown ────────────────────────────────────────────────────
 
     def _populate_models(self):
         self._set_models_for(cfg.llm_provider())
@@ -330,10 +549,8 @@ class CompanionPanel(QWidget):
                 if name:
                     self._model_combo.addItem(f"Pin to {name}", userData=name)
         self._model_combo.blockSignals(False)
-        # Fire once with the new default model id (NOT the display label) so
-        # the manager picks it up — important when label != id.
         if self._model_combo.count():
-            self.on_model_changed.emit(self._model_combo.currentData() or self._model_combo.currentText())
+            self.on_model_changed.emit(self._model_combo.currentData() or "")
 
     def refresh_for_provider(self, provider: str):
         """Called from outside when the active provider is switched at runtime."""
@@ -342,41 +559,107 @@ class CompanionPanel(QWidget):
 
     def _position_bottom_right(self):
         from PyQt6.QtWidgets import QApplication
-        screen = QApplication.primaryScreen().geometry()
-        x = screen.right() - PANEL_WIDTH - 24
-        y = screen.bottom() - PANEL_HEIGHT - 60
-        self.move(x, y)
+        screen = QApplication.primaryScreen().availableGeometry()
+        self.move(screen.right() - PANEL_WIDTH - 24,
+                  screen.bottom() - PANEL_HEIGHT - 24)
 
-    # ── Public API ────────────────────────────────────────────────────────────
+    # ── State + progress ──────────────────────────────────────────────────
+
+    def _apply_state_color(self, state: AppState):
+        c = STATE_COLORS[state]
+        self._status_dot.setStyleSheet(
+            f"color: rgb({c.red()},{c.green()},{c.blue()}); font-size: 10px;"
+        )
+
+    def _refresh_status(self):
+        """Status line = phase (or state label) + elapsed seconds while busy.
+
+        The elapsed readout matters most on local models, where a single
+        answer can take a minute on CPU and the old static 'Thinking…' was
+        indistinguishable from a hang.
+        """
+        base = self._phase or STATE_LABELS[self._state]
+        if self._state in BUSY_STATES and self._busy_since:
+            base = f"{base}  {time.monotonic() - self._busy_since:.1f}s"
+        self._status_label.setText(base)
 
     def set_state(self, state: AppState):
+        was_busy = self._state in BUSY_STATES
         self._state = state
-        color = STATE_COLORS[state]
-        self._status_dot.setStyleSheet(
-            f"color: rgb({color.red()},{color.green()},{color.blue()}); font-size: 10px;"
+        self._apply_state_color(state)
+
+        if state in BUSY_STATES:
+            if not was_busy:
+                self._busy_since = time.monotonic()
+                self._elapsed_timer.start()
+        else:
+            self._elapsed_timer.stop()
+            self._busy_since = 0.0
+            self._phase = ""
+            if state == AppState.LISTENING:
+                self._convo.end_assistant()
+
+        if state == AppState.IDLE:
+            self._convo.end_assistant()
+
+        self._stop_btn.setVisible(state in BUSY_STATES)
+        self._input.setEnabled(state not in BUSY_STATES)
+        self._send_btn.setEnabled(state not in BUSY_STATES)
+        self._retry_btn.setEnabled(
+            bool(self._last_question) and state not in BUSY_STATES
         )
-        self._status_label.setText(STATE_LABELS[state])
+
         self._waveform.setVisible(state == AppState.LISTENING)
         if state == AppState.LISTENING:
             self._waveform.start()
         else:
             self._waveform.stop()
 
-    def update_response(self, text: str):
-        """Append streaming text chunk."""
-        self._response_text = text
-        self._response_label.setText(text)
+        self._meter.setVisible(state == AppState.IDLE)
+        self._refresh_status()
+
+    def set_phase(self, phase: str):
+        """Sub-step within THINKING (capturing screen, locating, generating…)."""
+        self._phase = phase
+        self._refresh_status()
+
+    # ── Conversation API ──────────────────────────────────────────────────
+
+    def show_transcript(self, text: str):
+        """Render what STT actually heard.
+
+        Previously the transcript only went to the log file, so a misheard
+        question was indistinguishable from a bad answer.
+        """
+        self._last_question = text
+        self._convo.add_user(text)
+        self._convo.begin_assistant()
 
     def append_response_chunk(self, chunk: str):
-        self._response_text += chunk
-        self._response_label.setText(self._response_text)
+        self._convo.append_assistant(chunk)
+
+    def response_done(self, _text: str = ""):
+        self._convo.end_assistant()
+
+    def show_error(self, text: str):
+        """Errors used to go only to a Windows toast, which is easy to miss
+        and often disabled system-wide."""
+        self._convo.add_error(text)
+
+    def show_notice(self, text: str):
+        """Transient status line in the transcript (model downloads etc.)."""
+        self._convo.add_system(text)
+
+    def clear_conversation(self):
+        self._last_question = ""
+        self._retry_btn.setEnabled(False)
+        self._convo.clear()
 
     def set_audio_level(self, rms: float):
         self._waveform.set_level(rms)
+        self._meter.set_level(rms)
 
-    def clear_response(self):
-        self._response_text = ""
-        self._response_label.setText("")
+    # ── Copilot device-flow login ─────────────────────────────────────────
 
     def show_copilot_code(self, user_code: str, verification_uri: str):
         """Thread-safe: can be called from any thread. Emits a queued signal
@@ -387,27 +670,23 @@ class CompanionPanel(QWidget):
         """Thread-safe version of showing a Copilot login error."""
         self._sig_copilot_error.emit(error)
 
-    # ── Private slots (always run on Qt main thread) ──────────────────────────
-
     def _on_copilot_code(self, user_code: str, verification_uri: str):
-        self.show()   # bring panel to front
+        self.show()
         self.raise_()
-        self._response_text = (
-            "── GitHub Copilot Sign-In ──\n\n"
-            f"1.  Open:  {verification_uri}\n\n"
-            f"2.  Enter code:\n\n"
-            f"        {user_code}\n\n"
-            "3.  Click Authorize in GitHub.\n\n"
-            "ScreenGuide will sign in automatically once you authorize."
+        self._convo.add_system(
+            "GitHub Copilot sign-in\n"
+            f"1.  Open:  {verification_uri}\n"
+            f"2.  Enter code:  {user_code}\n"
+            "3.  Click Authorize — ScreenGuide signs in automatically."
         )
-        self._response_label.setText(self._response_text)
-        self._status_label.setText("Waiting for Copilot authorization…")
+        self._phase = "Waiting for Copilot authorization…"
+        self._refresh_status()
 
     def _on_copilot_error(self, error: str):
-        self._response_text = f"Copilot login failed:\n\n{error}"
-        self._response_label.setText(self._response_text)
+        self._convo.add_error(f"Copilot login failed: {error}")
 
-    # ── Mouse drag to reposition ──────────────────────────────────────────────
+    # ── Mouse drag to reposition ──────────────────────────────────────────
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
@@ -416,7 +695,8 @@ class CompanionPanel(QWidget):
         if event.buttons() == Qt.MouseButton.LeftButton and hasattr(self, '_drag_pos'):
             self.move(event.globalPosition().toPoint() - self._drag_pos)
 
-    # ── Painting: rounded glass background ───────────────────────────────────
+    # ── Painting: rounded glass background ────────────────────────────────
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
