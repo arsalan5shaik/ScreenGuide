@@ -155,7 +155,6 @@ def main():
     panel.on_model_changed.connect(manager.set_model)
     panel.on_text_submitted.connect(manager.submit_text)
     panel.on_stop_clicked.connect(manager.stop)
-    panel.on_retry_clicked.connect(manager.submit_text)
 
     def _on_doc_dropped(path: str):
         ok = manager.attach_document(path)

@@ -344,7 +344,6 @@ class CompanionPanel(QWidget):
     on_document_dropped      = pyqtSignal(str)
     on_text_submitted        = pyqtSignal(str)
     on_stop_clicked          = pyqtSignal()
-    on_retry_clicked         = pyqtSignal()
     _sig_copilot_code        = pyqtSignal(str, str)   # (user_code, verification_uri)
     _sig_copilot_error       = pyqtSignal(str)
 
