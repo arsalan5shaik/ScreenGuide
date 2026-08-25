@@ -250,6 +250,9 @@ class CompanionManager(QObject):
     """Thread-safe signals for Qt UI updates from async/audio threads."""
 
     sig_state_changed       = pyqtSignal(object)          # AppState
+    sig_transcript          = pyqtSignal(str)             # what STT heard
+    sig_phase               = pyqtSignal(str)             # sub-step of THINKING
+    sig_notice              = pyqtSignal(str)             # transient status line
     sig_response_chunk      = pyqtSignal(str)
     sig_response_done       = pyqtSignal(str)
     sig_audio_level         = pyqtSignal(float)
@@ -288,6 +291,11 @@ class CompanionManager(QObject):
         # Most recent mic RMS, fed by _handle_level — drives silence detection
         # for wake-word capture and the idle input meter.
         self._last_rms = 0.0
+        # First transcription downloads the Whisper weights and first LLM call
+        # cold-loads several GB into Ollama. Both look like a hang without a
+        # status line, so the first run of each gets a distinct phase message.
+        self._stt_ready = False
+        self._llm_warm = False
 
         # Per-app memory: { window_title: [Message, ...] }
         self._app_memory: dict[str, List[Message]] = {}
@@ -594,20 +602,58 @@ class CompanionManager(QObject):
             return
 
         self._emit_state(AppState.THINKING)
-        pointing_held = False  # track whether we told overlay to hold dwell
 
+        # Transcribe — bounded so a hung/downloading STT model can never
+        # freeze the UI on "Thinking..." forever.
         try:
-            # 1. Transcribe — bounded so a hung/downloading STT model can
-            # never freeze the UI on "Thinking..." forever
+            self.sig_phase.emit(
+                "Downloading speech model…" if not self._stt_ready
+                else "Transcribing…"
+            )
             transcript = await asyncio.wait_for(
                 self._get_stt().transcribe(pcm), timeout=90,
             )
-            _log.info("transcript: %r (provider=%s)",
-                      transcript[:120], cfg.llm_provider())
-            if not transcript.strip():
-                self._emit_state(AppState.IDLE)
-                return
+            self._stt_ready = True
+        except asyncio.TimeoutError:
+            self.sig_error.emit(
+                "Transcription timed out after 90s. The speech model may still "
+                "be downloading — try again in a moment."
+            )
+            self._emit_state(AppState.IDLE)
+            return
+        except Exception as e:
+            _log.exception("transcription failed")
+            self.sig_error.emit(f"Transcription failed: {e}")
+            self._emit_state(AppState.IDLE)
+            return
 
+        _log.info("transcript: %r (provider=%s)",
+                  transcript[:120], cfg.llm_provider())
+        if not transcript.strip():
+            self.sig_notice.emit("Didn't catch that — nothing was transcribed.")
+            self._emit_state(AppState.IDLE)
+            return
+
+        await self._process_query(transcript)
+
+    def submit_text(self, text: str):
+        """Handle a typed question from the panel composer.
+
+        Runs the exact same pipeline as a spoken one, minus STT — so screen
+        capture, pointing, web search and journalling all behave identically.
+        """
+        text = (text or "").strip()
+        if not text or self._state != AppState.IDLE:
+            return
+        self._emit_state(AppState.THINKING)
+        self._submit(self._process_query(text))
+
+    async def _process_query(self, transcript: str):
+        """Shared path for spoken and typed questions."""
+        self.sig_transcript.emit(transcript)
+        pointing_held = False  # track whether we told overlay to hold dwell
+
+        try:
             # ── Voice commands — short-circuit before LLM ──
             if is_stop(transcript):
                 self.stop()
@@ -672,6 +718,7 @@ class CompanionManager(QObject):
                 screenshots = []
                 images_b64 = []
             else:
+                self.sig_phase.emit("Capturing screen…")
                 screenshots = capture_all_screens()
                 images_b64 = [s.base64_jpeg for s in screenshots]
             # Fresh question → wipe the previous lesson's drawings and remember
@@ -779,6 +826,7 @@ class CompanionManager(QObject):
 
             search_results = ""
             if search_task:
+                self.sig_phase.emit("Searching the web…")
                 try:
                     search_results = await search_task or ""
                 except Exception:
@@ -787,6 +835,7 @@ class CompanionManager(QObject):
             detected = None
             detected_coord = None
             if locate_task:
+                self.sig_phase.emit("Locating element…")
                 try:
                     detected = await locate_task
                 except Exception:
@@ -860,6 +909,19 @@ class CompanionManager(QObject):
             full_response = ""
             display_buf = ""
             self._cancel_flag = False
+            if self._llm_warm:
+                self.sig_phase.emit("Generating…")
+            else:
+                # Cold start: Ollama/LM Studio load several GB before the first
+                # token. Name the model so a long first wait is explicable.
+                model_name = self._current_model or (
+                    cfg.get_ollama_model("vision" if images_b64 else "text")
+                    if cfg.llm_provider() == "ollama" else ""
+                )
+                self.sig_phase.emit(
+                    f"Loading {model_name}…" if model_name else "Loading model…"
+                )
+            first_chunk = True
             async for chunk in self._get_llm().stream_response(
                 user_text=transcript,
                 screenshots_b64=images_b64,
@@ -869,6 +931,11 @@ class CompanionManager(QObject):
             ):
                 if self._cancel_flag:
                     break
+                if first_chunk:
+                    # Tokens are flowing — the model is loaded and warm now.
+                    first_chunk = False
+                    self._llm_warm = True
+                    self.sig_phase.emit("Generating…")
                 full_response += chunk
                 display_buf += chunk
                 self._parse_points(display_buf)
@@ -1288,6 +1355,7 @@ class CompanionManager(QObject):
         cfg.set_active_llm(name)
         self._llm = None           # force re-init on next query
         self._current_model = None
+        self._llm_warm = False     # new backend → next call pays cold start again
         # If switching to Copilot and the cached model list is stale (or
         # missing), refresh it in the background so the panel shows the
         # *current* set of models GitHub offers — not stale hardcoded ones.
@@ -1349,6 +1417,7 @@ class CompanionManager(QObject):
         # Force the provider instance to re-read cfg on next call
         if cfg.llm_provider() == "ollama":
             self._llm = None
+            self._llm_warm = False   # different weights → cold load again
 
     def set_custom_instructions(self, text: str):
         """Tray callback — restrict/steer what ScreenGuide helps with. Persists

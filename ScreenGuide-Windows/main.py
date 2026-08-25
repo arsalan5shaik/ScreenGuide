@@ -113,8 +113,15 @@ def main():
 
     manager.sig_state_changed.connect(_on_state)
 
+    # Transcript + progress → panel. The transcript used to go only to the log
+    # file, so a misheard question was indistinguishable from a bad answer.
+    manager.sig_transcript.connect(panel.show_transcript)
+    manager.sig_phase.connect(panel.set_phase)
+    manager.sig_notice.connect(panel.show_notice)
+
     # Response streaming
     manager.sig_response_chunk.connect(panel.append_response_chunk)
+    manager.sig_response_done.connect(panel.response_done)
 
     # Audio level → cursor waveform (+ panel meter)
     manager.sig_audio_level.connect(panel.set_audio_level)
@@ -134,13 +141,21 @@ def main():
     manager.sig_draw.connect(overlay.add_shape)
     manager.sig_clear_drawings.connect(overlay.clear_annotations)
 
-    # Errors
-    manager.sig_error.connect(
-        lambda e: tray.show_notification("ScreenGuide error", str(e))
-    )
+    # Errors — surfaced in the panel as well as the tray. Windows toasts are
+    # easy to miss and are disabled outright on plenty of machines, which made
+    # failures look like silent hangs.
+    def _on_error(e):
+        panel.show_error(str(e))
+        if not panel.isVisible():
+            panel.show()
+        tray.show_notification("ScreenGuide error", str(e))
+    manager.sig_error.connect(_on_error)
 
     # Panel → Manager
     panel.on_model_changed.connect(manager.set_model)
+    panel.on_text_submitted.connect(manager.submit_text)
+    panel.on_stop_clicked.connect(manager.stop)
+    panel.on_retry_clicked.connect(manager.submit_text)
 
     def _on_doc_dropped(path: str):
         ok = manager.attach_document(path)
@@ -359,7 +374,10 @@ def main():
 
     # ── Show UI + start listener ──────────────────────────────────────────────
     overlay.show()        # persistent overlay (cursor follow)
-    # Panel is hidden by default — user can open it from the tray menu if needed
+    # Panel is shown on launch. It used to start hidden behind a tray menu item,
+    # which meant a first-time user saw no transcript, no answer text and no
+    # errors — the app looked inert even when it was working.
+    panel.show()
     manager.start()        # begin ambient mic + wake-word scanning
 
     providers = cfg.describe()
