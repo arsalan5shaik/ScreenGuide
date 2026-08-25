@@ -125,6 +125,71 @@ def entries_all() -> list[dict]:
     return [dict(zip(cols, r)) for r in rows]
 
 
+def _cols(conn: sqlite3.Connection) -> list[str]:
+    return [r[1] for r in conn.execute("PRAGMA table_info(entries)").fetchall()]
+
+
+def _build_filter(text: str = "", since: Optional[float] = None,
+                  app_key: str = "") -> tuple[str, list]:
+    """Shared WHERE clause for the history browser's search + counts."""
+    where, params = [], []
+    if since is not None:
+        where.append("created_at >= ?")
+        params.append(since)
+    if app_key:
+        where.append("app_key = ?")
+        params.append(app_key)
+    if text.strip():
+        # Match either side of the exchange — users look for a remembered
+        # phrase from the answer as often as from their own question.
+        where.append("(question LIKE ? OR answer LIKE ?)")
+        like = f"%{text.strip()}%"
+        params += [like, like]
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    return clause, params
+
+
+def search(text: str = "", since: Optional[float] = None, app_key: str = "",
+           limit: int = 200, offset: int = 0) -> list[dict]:
+    """Filtered history, newest first. Powers the history browser."""
+    clause, params = _build_filter(text, since, app_key)
+    with _connect() as conn:
+        rows = conn.execute(
+            f"SELECT * FROM entries{clause} ORDER BY created_at DESC "
+            f"LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        ).fetchall()
+        cols = _cols(conn)
+    return [dict(zip(cols, r)) for r in rows]
+
+
+def count(text: str = "", since: Optional[float] = None,
+          app_key: str = "") -> int:
+    """Total matches for a filter, ignoring limit/offset."""
+    clause, params = _build_filter(text, since, app_key)
+    with _connect() as conn:
+        row = conn.execute(
+            f"SELECT COUNT(*) FROM entries{clause}", params
+        ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def distinct_apps() -> list[str]:
+    """App keys that actually appear in the journal, for the filter dropdown."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT app_key FROM entries "
+            "WHERE app_key IS NOT NULL AND app_key != '' ORDER BY app_key"
+        ).fetchall()
+    return [r[0] for r in rows]
+
+
+def delete(entry_id: int) -> bool:
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM entries WHERE id = ?", (entry_id,))
+        return cur.rowcount > 0
+
+
 def due_for_review(limit: int = 5) -> list[dict]:
     """Spaced-repetition: pull entries whose `next_review_at` is in the past."""
     now = time.time()
