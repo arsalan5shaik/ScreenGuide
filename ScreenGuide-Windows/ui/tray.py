@@ -51,6 +51,7 @@ class TrayManager(QObject):
     on_workflow_start     = pyqtSignal()
     on_workflow_stop      = pyqtSignal()
     on_journal_open       = pyqtSignal()
+    on_journal_browse     = pyqtSignal()
     on_attach_doc         = pyqtSignal()
     on_run_setup          = pyqtSignal()
     on_diagnostics        = pyqtSignal()
@@ -230,6 +231,9 @@ class TrayManager(QObject):
         journal_action.setChecked(self._journal_enabled)
         journal_action.triggered.connect(self._toggle_journal)
         self._journal_action = journal_action
+
+        browse = journal_menu.addAction("Browse history…")
+        browse.triggered.connect(self.on_journal_browse)
 
         open_journal = journal_menu.addAction("Open journal folder")
         open_journal.triggered.connect(self.on_journal_open)
