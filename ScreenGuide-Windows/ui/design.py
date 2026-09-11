@@ -31,11 +31,17 @@ FONT_TITLE    = font(15, QFont.Weight.Bold)
 FONT_RESPONSE = font(13)
 
 # ── Geometry ──────────────────────────────────────────────────────────────────
-PANEL_WIDTH   = 380
-PANEL_HEIGHT  = 560
-PANEL_RADIUS  = 16
+# Roughly half the area of the previous 380x560 panel — it now appears only
+# while a question is in flight, so it needs to read at a glance rather than
+# hold a long session.
+PANEL_WIDTH   = 270
+PANEL_HEIGHT  = 400
+PANEL_RADIUS  = 14
 CURSOR_RADIUS = 18
-BUBBLE_RADIUS = 10
+BUBBLE_RADIUS = 9
+
+# How long the panel lingers after a turn finishes before hiding itself again.
+PANEL_AUTO_HIDE_MS = 9000
 
 # ── Animation ────────────────────────────────────────────────────────────────
 ANIM_FAST_MS  = 150
@@ -54,12 +60,12 @@ QLabel {{
     background: transparent;
 }}
 QLabel#title {{
-    font-size: 15px;
+    font-size: 13px;
     font-weight: bold;
     color: rgb(240, 240, 245);
 }}
 QLabel#status {{
-    font-size: 12px;
+    font-size: 11px;
     color: rgb(140, 140, 160);
 }}
 QLabel#response {{
@@ -101,30 +107,30 @@ QLabel#bubble_user {{
     border: 1px solid rgba(0, 120, 255, 90);
     border-radius: {BUBBLE_RADIUS}px;
     color: rgb(228, 236, 255);
-    font-size: 13px;
-    padding: 7px 10px;
+    font-size: 12px;
+    padding: 6px 8px;
 }}
 QLabel#bubble_assistant {{
     background-color: rgba(44, 44, 54, 190);
     border: 1px solid rgba(70, 70, 88, 150);
     border-radius: {BUBBLE_RADIUS}px;
     color: rgb(226, 226, 236);
-    font-size: 13px;
-    padding: 7px 10px;
+    font-size: 12px;
+    padding: 6px 8px;
 }}
 QLabel#bubble_error {{
     background-color: rgba(255, 70, 70, 26);
     border: 1px solid rgba(255, 70, 70, 110);
     border-radius: {BUBBLE_RADIUS}px;
     color: rgb(255, 176, 176);
-    font-size: 12px;
-    padding: 7px 10px;
+    font-size: 11px;
+    padding: 6px 8px;
 }}
 QLabel#bubble_system {{
     background: transparent;
     color: rgb(126, 126, 148);
-    font-size: 11px;
-    padding: 1px 4px;
+    font-size: 10px;
+    padding: 1px 3px;
 }}
 QLabel#bubble_role {{
     color: rgb(112, 112, 136);
@@ -137,10 +143,10 @@ QLabel#bubble_role {{
 QLineEdit#composer {{
     background-color: rgba(38, 38, 48, 220);
     border: 1px solid rgba(70, 70, 88, 170);
-    border-radius: 9px;
+    border-radius: 8px;
     color: rgb(236, 236, 244);
-    font-size: 13px;
-    padding: 7px 10px;
+    font-size: 12px;
+    padding: 5px 8px;
     selection-background-color: rgba(0, 120, 255, 140);
 }}
 QLineEdit#composer:focus {{
@@ -153,11 +159,11 @@ QLineEdit#composer:disabled {{
 QPushButton#icon_btn {{
     background-color: rgba(52, 52, 64, 190);
     border: 1px solid rgba(74, 74, 92, 160);
-    border-radius: 9px;
+    border-radius: 8px;
     color: rgb(224, 224, 234);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
-    padding: 6px 12px;
+    padding: 5px 9px;
 }}
 QPushButton#icon_btn:hover {{
     background-color: rgba(68, 68, 84, 220);
@@ -169,11 +175,11 @@ QPushButton#icon_btn:disabled {{
 QPushButton#stop_btn {{
     background-color: rgba(255, 70, 70, 30);
     border: 1px solid rgba(255, 70, 70, 150);
-    border-radius: 9px;
+    border-radius: 8px;
     color: rgb(255, 156, 156);
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
-    padding: 6px 12px;
+    padding: 4px 9px;
 }}
 QPushButton#stop_btn:hover {{
     background-color: rgba(255, 70, 70, 60);

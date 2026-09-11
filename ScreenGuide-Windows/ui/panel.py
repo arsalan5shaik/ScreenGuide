@@ -10,7 +10,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPen, QBrush
 
 from ui.design import (
-    PANEL_QSS, PANEL_WIDTH, PANEL_HEIGHT, PANEL_RADIUS,
+    PANEL_QSS, PANEL_WIDTH, PANEL_HEIGHT, PANEL_RADIUS, PANEL_AUTO_HIDE_MS,
     STATE_IDLE, STATE_LISTENING, STATE_THINKING, STATE_SPEAKING,
     FONT_TITLE, FONT_STATUS, FONT_LABEL,
 )
@@ -353,6 +353,10 @@ class CompanionPanel(QWidget):
         self._phase = ""
         self._busy_since = 0.0
         self._last_question = ""
+        # True when the panel put itself on screen for a turn (so it may take
+        # itself away again). False when the user opened it from the tray,
+        # which pins it until they close it.
+        self._auto_shown = False
         self._setup_window()
         self._build_ui()
         self._position_bottom_right()
@@ -361,6 +365,12 @@ class CompanionPanel(QWidget):
         self._elapsed_timer = QTimer(self)
         self._elapsed_timer.setInterval(100)
         self._elapsed_timer.timeout.connect(self._refresh_status)
+
+        # Retires the panel a few seconds after a turn ends.
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.setInterval(PANEL_AUTO_HIDE_MS)
+        self._hide_timer.timeout.connect(self._maybe_auto_hide)
 
         self._sig_copilot_code.connect(self._on_copilot_code)
         self._sig_copilot_error.connect(self._on_copilot_error)
@@ -391,8 +401,8 @@ class CompanionPanel(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(16, 16, 16, 16)
-        root.setSpacing(9)
+        root.setContentsMargins(11, 11, 11, 11)
+        root.setSpacing(6)
 
         # ── Header ──────────────────────────────────────────────────────
         header = QHBoxLayout()
@@ -405,14 +415,14 @@ class CompanionPanel(QWidget):
         header.addWidget(self._badge)
 
         self._min_btn = QPushButton("—")
-        self._min_btn.setFixedSize(24, 24)
+        self._min_btn.setFixedSize(20, 20)
         self._min_btn.setStyleSheet(
             "QPushButton { background: rgba(60,60,75,180); color: rgb(220,220,230);"
-            "border: none; border-radius: 12px; font-size: 14px; font-weight: bold; }"
+            "border: none; border-radius: 10px; font-size: 12px; font-weight: bold; }"
             "QPushButton:hover { background: rgba(80,80,95,220); }"
         )
-        self._min_btn.setToolTip("Hide panel (use tray to reopen)")
-        self._min_btn.clicked.connect(self.hide)
+        self._min_btn.setToolTip("Hide panel (hold the hotkey to bring it back)")
+        self._min_btn.clicked.connect(self.dismiss)
         header.addWidget(self._min_btn)
         root.addLayout(header)
 
@@ -559,8 +569,59 @@ class CompanionPanel(QWidget):
     def _position_bottom_right(self):
         from PyQt6.QtWidgets import QApplication
         screen = QApplication.primaryScreen().availableGeometry()
-        self.move(screen.right() - PANEL_WIDTH - 24,
-                  screen.bottom() - PANEL_HEIGHT - 24)
+        self.move(screen.right() - PANEL_WIDTH - 20,
+                  screen.bottom() - PANEL_HEIGHT - 20)
+
+    # ── Show / hide lifecycle ─────────────────────────────────────────────
+    #
+    # The panel is hidden at rest. It appears for a turn when the user holds
+    # the hotkey or says the wake word, then retires itself once the turn has
+    # been idle for a few seconds — unless the user is reading or typing in
+    # it, or opened it deliberately from the tray.
+
+    def reveal_for_turn(self):
+        """Bring the panel up for an incoming question."""
+        self._hide_timer.stop()
+        self._auto_shown = True
+        if not self.isVisible():
+            self.show()
+        self.raise_()
+
+    def show_pinned(self):
+        """Opened deliberately (tray / double-click) — stays until dismissed."""
+        self._hide_timer.stop()
+        self._auto_shown = False
+        self.show()
+        self.raise_()
+
+    def dismiss(self):
+        """Hide and forget any pending auto-hide."""
+        self._hide_timer.stop()
+        self._auto_shown = False
+        self.hide()
+
+    def _busy_in_panel(self) -> bool:
+        """True when hiding would interrupt the user mid-read or mid-type."""
+        return (
+            self.underMouse()
+            or self._input.hasFocus()
+            or bool(self._input.text().strip())
+        )
+
+    def _maybe_auto_hide(self):
+        if not self._auto_shown or self._state in BUSY_STATES:
+            return
+        if self._busy_in_panel():
+            self._hide_timer.start()      # check again later
+            return
+        self.hide()
+        self._auto_shown = False
+
+    def leaveEvent(self, event):
+        # Moving the cursor away re-arms a hide that was deferred by hover.
+        super().leaveEvent(event)
+        if self._auto_shown and self._state not in BUSY_STATES:
+            self._hide_timer.start()
 
     # ── State + progress ──────────────────────────────────────────────────
 
@@ -591,6 +652,7 @@ class CompanionPanel(QWidget):
             if not was_busy:
                 self._busy_since = time.monotonic()
                 self._elapsed_timer.start()
+            self._hide_timer.stop()
         else:
             self._elapsed_timer.stop()
             self._busy_since = 0.0
@@ -598,8 +660,13 @@ class CompanionPanel(QWidget):
             if state == AppState.LISTENING:
                 self._convo.end_assistant()
 
-        if state == AppState.IDLE:
+        if state == AppState.LISTENING:
+            # A question is starting — make sure the panel is on screen for it.
+            self.reveal_for_turn()
+        elif state == AppState.IDLE:
             self._convo.end_assistant()
+            if self._auto_shown:
+                self._hide_timer.start()
 
         self._stop_btn.setVisible(state in BUSY_STATES)
         self._input.setEnabled(state not in BUSY_STATES)
@@ -670,8 +737,9 @@ class CompanionPanel(QWidget):
         self._sig_copilot_error.emit(error)
 
     def _on_copilot_code(self, user_code: str, verification_uri: str):
-        self.show()
-        self.raise_()
+        # Pinned: the user has to leave and authorize in a browser, so this
+        # must not time out and vanish while they're doing it.
+        self.show_pinned()
         self._convo.add_system(
             "GitHub Copilot sign-in\n"
             f"1.  Open:  {verification_uri}\n"
