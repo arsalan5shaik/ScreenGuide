@@ -146,8 +146,7 @@ def main():
     # failures look like silent hangs.
     def _on_error(e):
         panel.show_error(str(e))
-        if not panel.isVisible():
-            panel.show()
+        panel.reveal_for_turn()
         tray.show_notification("ScreenGuide error", str(e))
     manager.sig_error.connect(_on_error)
 
@@ -166,8 +165,8 @@ def main():
     panel.on_document_dropped.connect(_on_doc_dropped)
 
     # Tray → UI / Manager
-    tray.on_show_panel.connect(panel.show)
-    tray.on_hide_panel.connect(panel.hide)
+    tray.on_show_panel.connect(panel.show_pinned)
+    tray.on_hide_panel.connect(panel.dismiss)
     tray.on_toggle_search.connect(manager.set_web_search)
     tray.on_toggle_wake_word.connect(manager.set_wake_word)
     tray.on_toggle_slow_mode.connect(manager.set_slow_mode)
@@ -237,6 +236,27 @@ def main():
         except Exception:
             subprocess.Popen(["explorer", path])
     tray.on_journal_open.connect(_open_journal)
+
+    # Journal history browser — the Q&A log has always been written to SQLite
+    # but was only readable via a spoken ten-item summary.
+    def _browse_journal():
+        from ui.history import HistoryWindow
+        win = _history_keepalive[0]
+        if win is None:
+            win = HistoryWindow()
+            # Asking again from history routes through the same pipeline as a
+            # typed question, and pins the panel so the answer is visible.
+            def _ask(q: str):
+                panel.show_pinned()
+                manager.submit_text(q)
+            win.on_ask_again.connect(_ask)
+            _history_keepalive[0] = win
+        else:
+            win.reload()
+        win.show()
+        win.raise_()
+        win.activateWindow()
+    tray.on_journal_browse.connect(_browse_journal)
 
     # Attach document (drag-drop alternative — file picker)
     def _attach_doc():
@@ -373,10 +393,9 @@ def main():
 
     # ── Show UI + start listener ──────────────────────────────────────────────
     overlay.show()        # persistent overlay (cursor follow)
-    # Panel is shown on launch. It used to start hidden behind a tray menu item,
-    # which meant a first-time user saw no transcript, no answer text and no
-    # errors — the app looked inert even when it was working.
-    panel.show()
+    # The panel stays hidden at rest and reveals itself when a question starts
+    # (hotkey or wake word), then retires a few seconds after the turn ends.
+    # Tray → Show Panel pins it open.
     manager.start()        # begin ambient mic + wake-word scanning
 
     providers = cfg.describe()
@@ -406,9 +425,10 @@ def main():
     sys.exit(app.exec())
 
 
-# Module-level slot used to keep a reference to the setup wizard alive while
-# Qt is running (PyQt will GC it otherwise and the dialog will vanish).
+# Module-level slots keeping references alive while Qt is running (PyQt will
+# GC these otherwise and the windows will vanish).
 _setup_keepalive: list = [None]
+_history_keepalive: list = [None]
 
 
 if __name__ == "__main__":
