@@ -219,6 +219,15 @@ class Config:
     # question on CPU can sit in prefill for minutes before the first token.
     ollama_timeout_s: int = field(default_factory=lambda: _env_int("OLLAMA_TIMEOUT_S", 900, lo=60, hi=7200))
 
+    # ── Highlighted-text context ─────────────────────────────────────────
+    # Read whatever the user has selected on screen and treat it as the
+    # subject of their question, so "what does this mean?" just works.
+    selection_context_enabled: bool = field(default_factory=lambda: _env_bool("SELECTION_CONTEXT", True))
+    # Tier 2 of that: a Ctrl+C round-trip for apps that expose nothing to UI
+    # Automation. The clipboard is restored afterwards, but it is shared
+    # state, so it can be turned off independently.
+    selection_use_clipboard: bool = field(default_factory=lambda: _env_bool("SELECTION_USE_CLIPBOARD", True))
+
     @property
     def screenshot_dir(self) -> Path:
         """Where captures live. Overridable, defaults under %LOCALAPPDATA%."""
@@ -277,6 +286,8 @@ class Config:
         "screenshot_retention_min":   "SCREENSHOT_RETENTION_MIN",
         "screenshot_send_count":      "SCREENSHOT_SEND_COUNT",
         "screenshot_max_width":       "SCREENSHOT_MAX_WIDTH",
+        "selection_context_enabled":  "SELECTION_CONTEXT",
+        "selection_use_clipboard":    "SELECTION_USE_CLIPBOARD",
         "whisper_model":              "WHISPER_MODEL",
         "response_language":          "RESPONSE_LANGUAGE",
         "ollama_vision_model":        "OLLAMA_VISION_MODEL",

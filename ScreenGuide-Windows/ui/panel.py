@@ -344,6 +344,7 @@ class CompanionPanel(QWidget):
     on_document_dropped      = pyqtSignal(str)
     on_text_submitted        = pyqtSignal(str)
     on_stop_clicked          = pyqtSignal()
+    on_open_settings         = pyqtSignal()
     _sig_copilot_code        = pyqtSignal(str, str)   # (user_code, verification_uri)
     _sig_copilot_error       = pyqtSignal(str)
 
@@ -382,6 +383,10 @@ class CompanionPanel(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        # Appearing for a turn must not pull focus out of whatever the user is
+        # working in: their text selection has to stay live (it's context for
+        # the question) and their typing shouldn't start landing in here.
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setFixedSize(PANEL_WIDTH, PANEL_HEIGHT)
         self.setObjectName("panel")
         self.setStyleSheet(PANEL_QSS)
@@ -414,13 +419,25 @@ class CompanionPanel(QWidget):
         self._badge = ProviderBadge(cfg.llm_provider())
         header.addWidget(self._badge)
 
-        self._min_btn = QPushButton("—")
-        self._min_btn.setFixedSize(20, 20)
-        self._min_btn.setStyleSheet(
+        _corner_btn = (
             "QPushButton { background: rgba(60,60,75,180); color: rgb(220,220,230);"
-            "border: none; border-radius: 10px; font-size: 12px; font-weight: bold; }"
+            "border: none; border-radius: 10px; font-size: %s; font-weight: bold; }"
             "QPushButton:hover { background: rgba(80,80,95,220); }"
         )
+
+        # Settings is reachable from here as well as the tray: on Windows 11
+        # the tray icon is hidden behind the overflow chevron by default, so
+        # a tray-only entry point is effectively invisible.
+        self._settings_btn = QPushButton("⚙")
+        self._settings_btn.setFixedSize(20, 20)
+        self._settings_btn.setStyleSheet(_corner_btn % "13px")
+        self._settings_btn.setToolTip("Settings")
+        self._settings_btn.clicked.connect(self.on_open_settings.emit)
+        header.addWidget(self._settings_btn)
+
+        self._min_btn = QPushButton("—")
+        self._min_btn.setFixedSize(20, 20)
+        self._min_btn.setStyleSheet(_corner_btn % "12px")
         self._min_btn.setToolTip("Hide panel (hold the hotkey to bring it back)")
         self._min_btn.clicked.connect(self.dismiss)
         header.addWidget(self._min_btn)
@@ -588,11 +605,17 @@ class CompanionPanel(QWidget):
         self.raise_()
 
     def show_pinned(self):
-        """Opened deliberately (tray / double-click) — stays until dismissed."""
+        """Opened deliberately (tray / double-click) — stays until dismissed.
+
+        Unlike a turn reveal, this one does take focus: the user asked for the
+        panel, so they almost certainly want to type in it.
+        """
         self._hide_timer.stop()
         self._auto_shown = False
         self.show()
         self.raise_()
+        self.activateWindow()
+        self._input.setFocus()
 
     def dismiss(self):
         """Hide and forget any pending auto-hide."""

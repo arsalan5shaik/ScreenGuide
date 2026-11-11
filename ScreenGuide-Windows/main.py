@@ -278,6 +278,7 @@ def main():
         win.raise_()
         win.activateWindow()
     tray.on_open_settings.connect(_open_settings)
+    panel.on_open_settings.connect(_open_settings)
 
     # Attach document (drag-drop alternative — file picker)
     def _attach_doc():

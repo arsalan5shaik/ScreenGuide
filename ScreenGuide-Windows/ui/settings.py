@@ -313,6 +313,44 @@ class SettingsWindow(QWidget):
         form.addRow("Reply language:", self._lang)
         col.addLayout(form)
 
+        sep0 = QFrame()
+        sep0.setObjectName("sep")
+        sep0.setFrameShape(QFrame.Shape.HLine)
+        col.addWidget(sep0)
+
+        selhead = QLabel("Highlighted text")
+        selhead.setObjectName("head")
+        col.addWidget(selhead)
+
+        self._sel_enabled = QCheckBox("Use whatever I've highlighted as context")
+        self._sel_enabled.setChecked(cfg.selection_context_enabled)
+        self._sel_enabled.toggled.connect(self._apply_selection)
+        col.addWidget(self._sel_enabled)
+
+        selhint = QLabel(
+            "Highlight something, then ask \"what does this mean?\" without "
+            "describing it. Read directly from the focused window where "
+            "possible."
+        )
+        selhint.setObjectName("hint")
+        selhint.setWordWrap(True)
+        col.addWidget(selhint)
+
+        self._sel_clip = QCheckBox("Fall back to a copy (Ctrl+C) in apps that don't expose it")
+        self._sel_clip.setChecked(cfg.selection_use_clipboard)
+        self._sel_clip.setEnabled(cfg.selection_context_enabled)
+        self._sel_clip.toggled.connect(self._apply_selection_clipboard)
+        col.addWidget(self._sel_clip)
+
+        cliphint = QLabel(
+            "Your clipboard is put back exactly as it was afterwards, and is "
+            "left alone entirely when it holds an image or files. Turn this "
+            "off to never touch it."
+        )
+        cliphint.setObjectName("hint")
+        cliphint.setWordWrap(True)
+        col.addWidget(cliphint)
+
         sep = QFrame()
         sep.setObjectName("sep")
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -403,6 +441,17 @@ class SettingsWindow(QWidget):
         cfg.set_setting("hotkey", val)
         self.on_hotkey_changed.emit(val)
         self._flash("Hotkey saved — restart to apply")
+
+    def _apply_selection(self, on: bool):
+        cfg.set_setting("selection_context_enabled", on)
+        self._sel_clip.setEnabled(on)
+        self._flash("Highlighted-text context on" if on else
+                    "Highlighted-text context off")
+
+    def _apply_selection_clipboard(self, on: bool):
+        cfg.set_setting("selection_use_clipboard", on)
+        self._flash("Copy fallback on" if on else
+                    "Copy fallback off — clipboard will never be touched")
 
     def _apply_whisper(self):
         cfg.set_setting("whisper_model", self._whisper.currentData())
