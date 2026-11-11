@@ -219,6 +219,20 @@ class Config:
     # question on CPU can sit in prefill for minutes before the first token.
     ollama_timeout_s: int = field(default_factory=lambda: _env_int("OLLAMA_TIMEOUT_S", 900, lo=60, hi=7200))
 
+    # ── Cloud sync (optional) ────────────────────────────────────────────
+    # Base URL of the sync API on Render, e.g.
+    # https://screenguide-sync.onrender.com. Empty disables sync entirely and
+    # the app stays purely local.
+    sync_api_url: str = field(default_factory=lambda: os.getenv("SYNC_API_URL", "").strip().rstrip("/"))
+    # Supabase project URL and publishable (anon) key. The anon key is meant
+    # to ship in clients — row-level security is what protects the data, not
+    # the secrecy of this value. The service_role key must never appear here.
+    supabase_url: str = field(default_factory=lambda: os.getenv("SUPABASE_URL", "").strip().rstrip("/"))
+    supabase_anon_key: str = field(default_factory=lambda: os.getenv("SUPABASE_ANON_KEY", "").strip())
+    # Sync automatically in the background as well as on demand.
+    sync_auto: bool = field(default_factory=lambda: _env_bool("SYNC_AUTO", True))
+    sync_interval_min: int = field(default_factory=lambda: _env_int("SYNC_INTERVAL_MIN", 15, lo=1, hi=1440))
+
     # ── Highlighted-text context ─────────────────────────────────────────
     # Read whatever the user has selected on screen and treat it as the
     # subject of their question, so "what does this mean?" just works.
@@ -288,6 +302,8 @@ class Config:
         "screenshot_max_width":       "SCREENSHOT_MAX_WIDTH",
         "selection_context_enabled":  "SELECTION_CONTEXT",
         "selection_use_clipboard":    "SELECTION_USE_CLIPBOARD",
+        "sync_auto":                  "SYNC_AUTO",
+        "sync_interval_min":          "SYNC_INTERVAL_MIN",
         "whisper_model":              "WHISPER_MODEL",
         "response_language":          "RESPONSE_LANGUAGE",
         "ollama_vision_model":        "OLLAMA_VISION_MODEL",

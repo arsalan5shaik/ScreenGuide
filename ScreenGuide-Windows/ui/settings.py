@@ -8,6 +8,8 @@ levels into the tray menu. Changes apply immediately and are written back to
 
 from __future__ import annotations
 
+import threading
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QComboBox,
     QSpinBox, QCheckBox, QPushButton, QTabWidget, QLineEdit, QFrame,
@@ -89,6 +91,7 @@ class SettingsWindow(QWidget):
         self.setMinimumSize(500, 500)
 
         self._installed: dict[str, list[str]] = {"vision": [], "text": []}
+        self._sync = None            # SyncEngine, built on first Account use
         self._build_ui()
         self._load_installed_models()
         self._refresh_stats()
@@ -109,6 +112,7 @@ class SettingsWindow(QWidget):
         tabs.addTab(self._models_tab(), "Model")
         tabs.addTab(self._capture_tab(), "Screen capture")
         tabs.addTab(self._behaviour_tab(), "Behaviour")
+        tabs.addTab(self._account_tab(), "Account")
         root.addWidget(tabs, stretch=1)
 
         foot = QHBoxLayout()
@@ -365,6 +369,198 @@ class SettingsWindow(QWidget):
         col.addWidget(note)
         col.addStretch(1)
         return w
+
+    def _account_tab(self) -> QWidget:
+        w = QWidget()
+        col = QVBoxLayout(w)
+        col.setContentsMargins(14, 14, 14, 14)
+        col.setSpacing(9)
+
+        head = QLabel("Cloud sync")
+        head.setObjectName("head")
+        col.addWidget(head)
+
+        blurb = QLabel(
+            "Sign in to keep your journal in step across machines. Everything "
+            "works offline either way — your local history stays the source "
+            "of truth and syncs when a connection is available. Screenshots "
+            "are never uploaded."
+        )
+        blurb.setObjectName("hint")
+        blurb.setWordWrap(True)
+        col.addWidget(blurb)
+
+        self._acct_status = QLabel("")
+        self._acct_status.setObjectName("hint")
+        self._acct_status.setWordWrap(True)
+        col.addWidget(self._acct_status)
+
+        form = QFormLayout()
+        form.setSpacing(9)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        self._acct_email = QLineEdit()
+        self._acct_email.setPlaceholderText("you@example.com")
+        form.addRow("Email:", self._acct_email)
+        self._acct_pw = QLineEdit()
+        self._acct_pw.setEchoMode(QLineEdit.EchoMode.Password)
+        self._acct_pw.setPlaceholderText("at least 6 characters")
+        self._acct_pw.returnPressed.connect(self._do_sign_in)
+        form.addRow("Password:", self._acct_pw)
+        col.addLayout(form)
+
+        row = QHBoxLayout()
+        row.setSpacing(7)
+        self._btn_signin = QPushButton("Sign in")
+        self._btn_signin.clicked.connect(self._do_sign_in)
+        self._btn_signup = QPushButton("Create account")
+        self._btn_signup.clicked.connect(self._do_sign_up)
+        self._btn_signout = QPushButton("Sign out")
+        self._btn_signout.setObjectName("danger")
+        self._btn_signout.clicked.connect(self._do_sign_out)
+        row.addWidget(self._btn_signin)
+        row.addWidget(self._btn_signup)
+        row.addStretch()
+        row.addWidget(self._btn_signout)
+        col.addLayout(row)
+
+        sep = QFrame()
+        sep.setObjectName("sep")
+        sep.setFrameShape(QFrame.Shape.HLine)
+        col.addWidget(sep)
+
+        self._sync_auto = QCheckBox("Sync automatically in the background")
+        self._sync_auto.setChecked(cfg.sync_auto)
+        self._sync_auto.toggled.connect(self._apply_sync_auto)
+        col.addWidget(self._sync_auto)
+
+        srow = QHBoxLayout()
+        srow.setSpacing(7)
+        self._btn_sync = QPushButton("Sync now")
+        self._btn_sync.clicked.connect(self._do_sync)
+        srow.addWidget(self._btn_sync)
+        self._sync_msg = QLabel("")
+        self._sync_msg.setObjectName("hint")
+        self._sync_msg.setWordWrap(True)
+        srow.addWidget(self._sync_msg, stretch=1)
+        col.addLayout(srow)
+        col.addStretch(1)
+
+        self._refresh_account()
+        return w
+
+    # ── Account actions ───────────────────────────────────────────────────
+
+    def _engine(self):
+        """Lazily built so a build without sync configured still opens."""
+        if self._sync is None:
+            from sync.engine import SyncEngine
+            self._sync = SyncEngine()
+        return self._sync
+
+    def _refresh_account(self):
+        try:
+            eng = self._engine()
+        except Exception as e:
+            self._acct_status.setText(f"Sync unavailable: {e}")
+            return
+        configured = eng.configured
+        signed_in = eng.signed_in
+
+        for wdg in (self._acct_email, self._acct_pw, self._btn_signin,
+                    self._btn_signup):
+            wdg.setEnabled(configured and not signed_in)
+        self._btn_signout.setEnabled(signed_in)
+        self._btn_sync.setEnabled(configured and signed_in)
+        self._sync_auto.setEnabled(configured and signed_in)
+
+        if not configured:
+            self._acct_status.setText(
+                "No sync server configured in this build. Set SYNC_API_URL, "
+                "SUPABASE_URL and SUPABASE_ANON_KEY in .env to enable it."
+            )
+        elif signed_in:
+            self._acct_status.setText(f"Signed in as {eng.email}")
+        else:
+            self._acct_status.setText("Not signed in — your journal stays on "
+                                      "this machine only.")
+
+    def _account_busy(self, busy: bool):
+        for wdg in (self._btn_signin, self._btn_signup, self._btn_signout,
+                    self._btn_sync):
+            wdg.setEnabled(not busy)
+
+    def _run_bg(self, fn, done):
+        """Run a network call off the UI thread, finish back on it."""
+        self._account_busy(True)
+
+        def worker():
+            try:
+                res = fn()
+                err = None
+            except Exception as e:
+                res, err = None, str(e)
+            # Qt widgets are main-thread only — hop back via the event loop.
+            QTimer.singleShot(0, lambda: (self._account_busy(False),
+                                          done(res, err)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _do_sign_in(self):
+        email = self._acct_email.text().strip()
+        pw = self._acct_pw.text()
+        if not email or not pw:
+            self._sync_msg.setText("Enter an email and password first.")
+            return
+        self._sync_msg.setText("Signing in…")
+        eng = self._engine()
+
+        def done(_res, err):
+            self._acct_pw.clear()
+            self._sync_msg.setText(err or "Signed in.")
+            self._refresh_account()
+            if not err:
+                self._do_sync()
+        self._run_bg(lambda: eng.sign_in(email, pw), done)
+
+    def _do_sign_up(self):
+        email = self._acct_email.text().strip()
+        pw = self._acct_pw.text()
+        if not email or not pw:
+            self._sync_msg.setText("Enter an email and password first.")
+            return
+        self._sync_msg.setText("Creating account…")
+        eng = self._engine()
+
+        def done(_res, err):
+            self._acct_pw.clear()
+            self._sync_msg.setText(err or "Account created.")
+            self._refresh_account()
+            if not err:
+                self._do_sync()
+        self._run_bg(lambda: eng.sign_up(email, pw), done)
+
+    def _do_sign_out(self):
+        eng = self._engine()
+
+        def done(_res, err):
+            self._sync_msg.setText(err or "Signed out. Local history kept.")
+            self._refresh_account()
+        self._run_bg(eng.sign_out, done)
+
+    def _do_sync(self):
+        eng = self._engine()
+        if not (eng.configured and eng.signed_in):
+            return
+        self._sync_msg.setText("Syncing…")
+
+        def done(res, err):
+            self._sync_msg.setText(err or (res.summary() if res else "Done."))
+            self._refresh_account()
+        self._run_bg(lambda: eng.sync(), done)
+
+    def _apply_sync_auto(self, on: bool):
+        cfg.set_setting("sync_auto", on)
+        self._flash("Background sync on" if on else "Background sync off")
 
     # ── Apply handlers ────────────────────────────────────────────────────
 

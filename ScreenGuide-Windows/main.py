@@ -5,10 +5,11 @@ Boots Qt, spawns overlay+panel+tray, starts ambient mic listener, binds hotkey.
 
 import os
 import sys
+import threading
 from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 
 from config import cfg
 from ui.tray import TrayManager
@@ -280,6 +281,40 @@ def main():
     tray.on_open_settings.connect(_open_settings)
     panel.on_open_settings.connect(_open_settings)
 
+    # ── Background journal sync ───────────────────────────────────────────
+    # Only runs when a backend is configured AND the user is signed in; it is
+    # a no-op otherwise, so a purely local install never touches the network.
+    def _start_background_sync():
+        try:
+            from sync.engine import SyncEngine
+        except Exception as e:
+            print(f"[sync] unavailable: {e}")
+            return
+        engine = SyncEngine()
+        _sync_keepalive[0] = engine
+        if not engine.configured:
+            return
+
+        def tick():
+            if not (cfg.sync_auto and engine.signed_in):
+                return
+
+            def work():
+                res = engine.sync()
+                if not res.ok:
+                    # Background sync failing is not worth a popup — the
+                    # Account tab reports it when the user looks.
+                    print(f"[sync] {res.error}")
+            threading.Thread(target=work, daemon=True).start()
+
+        timer = QTimer()
+        timer.setInterval(max(1, cfg.sync_interval_min) * 60_000)
+        timer.timeout.connect(tick)
+        timer.start()
+        _sync_keepalive[1] = timer
+        QTimer.singleShot(8000, tick)    # once shortly after launch
+    _start_background_sync()
+
     # Attach document (drag-drop alternative — file picker)
     def _attach_doc():
         from PyQt6.QtWidgets import QFileDialog
@@ -452,6 +487,8 @@ def main():
 _setup_keepalive: list = [None]
 _history_keepalive: list = [None]
 _settings_keepalive: list = [None]
+# [SyncEngine, QTimer] — the timer must outlive this function or Qt stops it.
+_sync_keepalive: list = [None, None]
 
 
 if __name__ == "__main__":
