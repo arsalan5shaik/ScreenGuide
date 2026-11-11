@@ -22,6 +22,54 @@ for _name in (".env", ".env.local"):
         load_dotenv(_p, override=True)
 
 
+def _env_bool(key: str, default: bool) -> bool:
+    raw = os.getenv(key, "").strip().lower()
+    if not raw:
+        return default
+    return raw in ("1", "true", "yes", "on")
+
+
+def _env_int(key: str, default: int, *, lo: int, hi: int) -> int:
+    """Read an int setting, clamped. A bad value falls back rather than
+    crashing startup — these are hand-edited in .env."""
+    raw = os.getenv(key, "").strip()
+    if not raw:
+        return default
+    try:
+        return max(lo, min(hi, int(float(raw))))
+    except ValueError:
+        return default
+
+
+def write_env(key: str, value) -> bool:
+    """Persist one setting to .env, replacing any existing line for that key.
+
+    Used by the settings window so changes survive a restart. Returns False
+    if the file couldn't be written (read-only install, etc.).
+    """
+    env_path = _HERE / ".env"
+    val = "" if value is None else str(value)
+    try:
+        lines = (env_path.read_text(encoding="utf-8").splitlines(keepends=True)
+                 if env_path.exists() else [])
+        for i, line in enumerate(lines):
+            stripped = line.lstrip()
+            if stripped.startswith(("#", ";")):
+                continue
+            name = stripped.split("=", 1)[0].strip() if "=" in stripped else ""
+            if name == key:
+                lines[i] = f"{key}={val}\n"
+                break
+        else:
+            if lines and not lines[-1].endswith("\n"):
+                lines.append("\n")
+            lines.append(f"{key}={val}\n")
+        env_path.write_text("".join(lines), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
 DEFAULT_SYSTEM_PROMPT = """You are ScreenGuide, a VISUAL AI tutor running on Windows. You live
 next to the user's cursor. Your job is to *show*, not just tell.
 
@@ -152,6 +200,34 @@ class Config:
     # easier to hold than a 3-key chord. Override with SCREENGUIDE_HOTKEY in .env.
     hotkey: str = field(default_factory=lambda: os.getenv("SCREENGUIDE_HOTKEY", "ctrl+win"))
 
+    # ── Rolling screenshot history ───────────────────────────────────────
+    # A background capture keeps a short visual record of the screen so the
+    # model can see what changed, not just the current frame. Everything
+    # stays on this machine and is pruned on a timer.
+    screenshot_history_enabled: bool = field(default_factory=lambda: _env_bool("SCREENSHOT_HISTORY", True))
+    # Seconds between automatic captures.
+    screenshot_interval_s: int = field(default_factory=lambda: _env_int("SCREENSHOT_INTERVAL_S", 60, lo=5, hi=3600))
+    # How long a capture is kept before it's deleted, in minutes.
+    screenshot_retention_min: int = field(default_factory=lambda: _env_int("SCREENSHOT_RETENTION_MIN", 60, lo=1, hi=1440))
+    # How many of the most recent captures go to the model with each question.
+    # Each extra image costs real time on a local model, so this is tunable.
+    screenshot_send_count: int = field(default_factory=lambda: _env_int("SCREENSHOT_SEND_COUNT", 2, lo=1, hi=6))
+    # Longest edge of a stored capture. Smaller = faster model, less detail.
+    screenshot_max_width: int = field(default_factory=lambda: _env_int("SCREENSHOT_MAX_WIDTH", 1280, lo=640, hi=3840))
+
+    # How long to wait on a local model's reply. Generous: a multi-image
+    # question on CPU can sit in prefill for minutes before the first token.
+    ollama_timeout_s: int = field(default_factory=lambda: _env_int("OLLAMA_TIMEOUT_S", 900, lo=60, hi=7200))
+
+    @property
+    def screenshot_dir(self) -> Path:
+        """Where captures live. Overridable, defaults under %LOCALAPPDATA%."""
+        custom = os.getenv("SCREENSHOT_DIR", "").strip()
+        if custom:
+            return Path(custom)
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return Path(base) / "ScreenGuide" / "screenshots"
+
     def llm_provider(self) -> str:
         """Returns the active LLM provider (runtime override > priority chain).
 
@@ -192,6 +268,40 @@ class Config:
         out.append("ollama")     # always available if the daemon is running
         out.append("lmstudio")   # always available if the local server is running
         return out
+
+    # Settings the settings window may change: field name → .env key.
+    _PERSISTED = {
+        "hotkey":                     "SCREENGUIDE_HOTKEY",
+        "screenshot_history_enabled": "SCREENSHOT_HISTORY",
+        "screenshot_interval_s":      "SCREENSHOT_INTERVAL_S",
+        "screenshot_retention_min":   "SCREENSHOT_RETENTION_MIN",
+        "screenshot_send_count":      "SCREENSHOT_SEND_COUNT",
+        "screenshot_max_width":       "SCREENSHOT_MAX_WIDTH",
+        "whisper_model":              "WHISPER_MODEL",
+        "response_language":          "RESPONSE_LANGUAGE",
+        "ollama_vision_model":        "OLLAMA_VISION_MODEL",
+        "ollama_text_model":          "OLLAMA_TEXT_MODEL",
+        "lmstudio_model":             "LMSTUDIO_MODEL",
+    }
+
+    def set_setting(self, field_name: str, value) -> None:
+        """Apply a setting now and persist it to .env.
+
+        Also mirrors into os.environ so anything reading the raw env (and any
+        runtime override such as SCREENGUIDE_OLLAMA_*_MODEL) agrees with the
+        dataclass instead of silently shadowing it.
+        """
+        if field_name not in self._PERSISTED:
+            raise KeyError(f"not a persisted setting: {field_name}")
+        setattr(self, field_name, value)
+        env_key = self._PERSISTED[field_name]
+        raw = ("1" if value else "0") if isinstance(value, bool) else str(value)
+        os.environ[env_key] = raw
+        if field_name == "ollama_vision_model":
+            os.environ["SCREENGUIDE_OLLAMA_VISION_MODEL"] = str(value)
+        elif field_name == "ollama_text_model":
+            os.environ["SCREENGUIDE_OLLAMA_TEXT_MODEL"] = str(value)
+        write_env(env_key, raw)
 
     def set_active_llm(self, name: str) -> None:
         """Runtime switch — next query uses this provider. Persisted to .env."""
