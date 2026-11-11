@@ -1,0 +1,32 @@
+# Render blueprint for the ScreenGuide sync API.
+#
+# Render → New → Blueprint → pick the ScreenGuide repo. Render reads this file
+# and creates the service. The three Supabase values are marked sync:false, so
+# Render prompts for them instead of taking them from this file — secrets must
+# not live in the repo.
+
+services:
+  - type: web
+    name: screenguide-sync
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: server
+    buildCommand: pip install -r requirements.txt
+    # Render supplies $PORT; binding to a fixed port makes the deploy fail.
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: LOG_LEVEL
+        value: info
+      - key: MAX_SYNC_BATCH
+        value: "500"
