@@ -231,11 +231,73 @@ CLEAR_RE     = re.compile(r'\[CLEAR\]')
 CIRCLE_AT_RE    = re.compile(r'\[CIRCLE:@([^:\]]+?)' + _C + r'\]')
 UNDERLINE_AT_RE = re.compile(r'\[UNDERLINE:@([^:\]]+?)' + _C + r'\]')
 
-ANY_TAG_RE   = re.compile(
-    r'\[(?:POINT|ARROW|CIRCLE|UNDERLINE|LABEL|LINE|RECT|POLY|TEXT|ANGLE|CLEAR)'
-    r'(?::[^\]]*)?\]'
+# Tag scrubbing for the visible transcript.
+#
+# This has to be forgiving. Small local models get the syntax wrong constantly
+# — lowercase names, a stray space, a tag name that was never in the prompt —
+# and anything the scrubber misses is shown to the user as raw markup in the
+# middle of an answer.
+#
+# `(?!\()` keeps markdown links intact: "[TEXT](http://…)" is a link, not a tag.
+_TAG_NAMES = (
+    r'POINT|ARROW|CIRCLE|UNDERLINE|LABEL|LINE|RECT|POLY|TEXT|ANGLE|CLEAR'
+    # Names the models invent often enough to be worth scrubbing by name.
+    # Names the models invent often enough to be worth scrubbing by name.
+    # Deliberately excludes words that occur in ordinary prose inside
+    # brackets, e.g. "[note]", which must survive untouched.
+    r'|HIGHLIGHT|ANNOTATION|ANNOTATE|ARROWHEAD'
 )
-ANY_PARTIAL_RE = re.compile(r'\[[A-Z]{0,9}(?::[^\]]*)?$')
+ANY_TAG_RE = re.compile(
+    r'\[\s*(?:' + _TAG_NAMES + r')\s*(?::[^\]]*)?\](?!\()',
+    re.IGNORECASE,
+)
+# Fallback for invented names: anything shaped like [NAME:<number>…], i.e. a
+# tag name followed by coordinates. Won't touch "[1]" citations (no name) or
+# "[note]" (no numeric payload).
+COORD_TAG_RE = re.compile(
+    r'\[\s*[A-Za-z][A-Za-z0-9_]{0,15}\s*:\s*-?\d[^\]]*\](?!\()'
+)
+# An unterminated tag at the tail of the buffer — hold it back until the
+# closing bracket arrives so a half-written tag never reaches the screen.
+# The name part has to be allowed to be empty: chunks can be a single
+# character, so the very first thing seen is a bare "[" with the name still
+# in flight. Requiring a letter here let every tag through one char at a time.
+ANY_PARTIAL_RE = re.compile(r'\[\s*[A-Za-z0-9_]{0,16}\s*(?::[^\]]*)?$')
+
+
+def _scrub_tags(text: str) -> str:
+    """Remove every drawing/pointing tag from text meant for display or TTS."""
+    return COORD_TAG_RE.sub("", ANY_TAG_RE.sub("", text))
+
+
+def _describe_error(e: BaseException) -> str:
+    """A message worth showing the user.
+
+    Several exceptions that matter here stringify to nothing at all —
+    httpx.ReadTimeout is the common one — which used to surface as an empty
+    red bubble that said only "Error". Always fall back to the type, and
+    translate the timeout case into advice the user can act on.
+    """
+    import httpx
+
+    if isinstance(e, (httpx.ReadTimeout, httpx.ConnectTimeout,
+                      httpx.PoolTimeout, asyncio.TimeoutError)):
+        return (
+            f"The model didn't respond within "
+            f"{cfg.ollama_timeout_s // 60} minutes.\n"
+            "On a CPU-only machine this usually means the request was too "
+            "heavy — try sending fewer screenshots per question "
+            "(Settings → Screen capture), a lower detail level, or a "
+            "smaller model."
+        )
+    if isinstance(e, httpx.ConnectError):
+        return (
+            f"Couldn't reach the model server at {cfg.ollama_host}.\n"
+            "Make sure Ollama is running — open a terminal and run "
+            "`ollama serve`."
+        )
+    msg = str(e).strip()
+    return msg if msg else f"{type(e).__name__} (no further detail)"
 
 # Questions that ask ScreenGuide to locate / click UI elements — triggers the
 # Computer Use element locator when Claude is the provider.
@@ -337,6 +399,16 @@ class CompanionManager(QObject):
             device=cfg.mic_device_index,
         )
 
+        # Rolling screenshot history — local folder, pruned on a timer.
+        from screen.history import ScreenshotHistory
+        self._history = ScreenshotHistory(
+            folder=cfg.screenshot_dir,
+            interval_s=cfg.screenshot_interval_s,
+            retention_min=cfg.screenshot_retention_min,
+            max_width=cfg.screenshot_max_width,
+            enabled=cfg.screenshot_history_enabled,
+        )
+
         # Background asyncio loop
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
@@ -348,6 +420,12 @@ class CompanionManager(QObject):
             self._listener.start()
         except Exception as e:
             self.sig_error.emit(f"Mic error: {e}")
+        # Rolling screen capture. The thread starts regardless so a later
+        # toggle takes effect without a restart; it no-ops while disabled.
+        try:
+            self._history.start()
+        except Exception as e:
+            _log.warning("screenshot history failed to start: %s", e)
         # Sleep/wake watchdog — restarts mic + loop after system resume
         self._start_sleep_watchdog()
         # On startup, refresh any stale model cache in the background.
@@ -372,6 +450,10 @@ class CompanionManager(QObject):
         except Exception:
             pass
         self._listener.stop()
+        try:
+            self._history.stop()
+        except Exception:
+            pass
         if self._loop and self._loop.is_running():
             self._loop.call_soon_threadsafe(self._loop.stop)
 
@@ -436,7 +518,7 @@ class CompanionManager(QObject):
                 # "Listening..." forever. Surface it and always return to idle.
                 _log.exception("background task failed: %s", e)
                 try:
-                    self.sig_error.emit(str(e))
+                    self.sig_error.emit(_describe_error(e))
                     self._emit_state(AppState.IDLE)
                 except Exception:
                     pass
@@ -521,6 +603,52 @@ class CompanionManager(QObject):
             return
         self._begin_capture()
         self._submit(self._auto_stop_after_pause())
+
+    # ── Screenshot history ────────────────────────────────────────────────
+
+    def _history_frames(self, keep_for_live: int) -> list[str]:
+        """Earlier frames to send alongside the live capture, oldest first.
+
+        `screenshot_send_count` is the total number of images the model sees,
+        so the live capture's own frames are subtracted from the budget. The
+        privacy guard has already run by this point; this is only reached when
+        screenshotting is allowed for this turn.
+        """
+        if not (self._history and self._history.enabled):
+            return []
+        budget = cfg.screenshot_send_count - max(1, keep_for_live)
+        if budget <= 0:
+            return []
+        out = []
+        for cap in self._history.recent(budget):
+            b64 = cap.as_base64_jpeg()
+            if b64:
+                out.append(b64)
+        return out
+
+    def history_stats(self) -> dict:
+        return self._history.stats() if self._history else {}
+
+    def set_history_enabled(self, on: bool) -> None:
+        cfg.set_setting("screenshot_history_enabled", bool(on))
+        if self._history:
+            self._history.set_enabled(bool(on))
+
+    def configure_history(self, *, interval_s=None, retention_min=None,
+                          max_width=None) -> None:
+        if interval_s is not None:
+            cfg.set_setting("screenshot_interval_s", int(interval_s))
+        if retention_min is not None:
+            cfg.set_setting("screenshot_retention_min", int(retention_min))
+        if max_width is not None:
+            cfg.set_setting("screenshot_max_width", int(max_width))
+        if self._history:
+            self._history.configure(interval_s=interval_s,
+                                    retention_min=retention_min,
+                                    max_width=max_width)
+
+    def clear_history_screenshots(self) -> int:
+        return self._history.clear() if self._history else 0
 
     def _handle_level(self, rms: float):
         # Cached for _auto_stop_after_pause's silence detection. Written from
@@ -714,13 +842,28 @@ class CompanionManager(QObject):
             # actually wants when they ask "who is MrBeast" while on YouTube.
             sensitive = self._privacy_guard and is_sensitive_window(title)
             identity_q = is_identity_question(transcript)
+            history_note = ""
             if sensitive or identity_q:
                 screenshots = []
                 images_b64 = []
             else:
                 self.sig_phase.emit("Capturing screen…")
                 screenshots = capture_all_screens()
-                images_b64 = [s.base64_jpeg for s in screenshots]
+                # The live capture is always last and is the only frame the
+                # coordinate maths may use — _screens_ctx denormalizes drawing
+                # tags against it, so an older frame must never take its place.
+                live = [s.base64_jpeg for s in screenshots]
+                prior = self._history_frames(keep_for_live=len(live))
+                images_b64 = prior + live
+                if prior:
+                    history_note = (
+                        f"\n\nSCREEN HISTORY: you are given {len(images_b64)} "
+                        f"screenshots in chronological order. The LAST image is "
+                        f"the screen RIGHT NOW — describe, point at and draw on "
+                        f"that one only. The earlier image(s) are from the last "
+                        f"few minutes and are context for what changed; never "
+                        f"describe them as the current screen.\n"
+                    )
             # Fresh question → wipe the previous lesson's drawings and remember
             # this turn's screenshots for coordinate mapping.
             self._screens_ctx = screenshots
@@ -889,7 +1032,7 @@ class CompanionManager(QObject):
                 detected_coord=detected_coord,
                 code_active=code_active,
                 language_code=lang_code,
-                extra=ocr_extra + doc_extra + fig_extra,
+                extra=ocr_extra + doc_extra + fig_extra + history_note,
             )
             if sensitive:
                 system += (
@@ -939,7 +1082,7 @@ class CompanionManager(QObject):
                 full_response += chunk
                 display_buf += chunk
                 self._parse_points(display_buf)
-                display_buf = ANY_TAG_RE.sub("", display_buf)
+                display_buf = _scrub_tags(display_buf)
                 m = ANY_PARTIAL_RE.search(display_buf)
                 if m:
                     flush = display_buf[: m.start()]
@@ -949,8 +1092,13 @@ class CompanionManager(QObject):
                     display_buf = ""
                 if flush:
                     self.sig_response_chunk.emit(flush)
-            if display_buf:
-                self.sig_response_chunk.emit(ANY_TAG_RE.sub("", display_buf))
+            # Whatever is left is either ordinary trailing text or a tag the
+            # model never closed. Emitting the latter raw is what used to put
+            # fragments like "500:CENTERED" in the middle of an answer, so
+            # drop it rather than show it.
+            tail = _scrub_tags(display_buf)
+            if tail and not ANY_PARTIAL_RE.search(tail):
+                self.sig_response_chunk.emit(tail)
 
             # 6. Update per-app history
             history.append(Message(role="user", content=transcript))
@@ -964,7 +1112,7 @@ class CompanionManager(QObject):
                     self._lesson_steps = steps
                     self._lesson_step_idx = 0
 
-            clean = ANY_TAG_RE.sub("", full_response).strip()
+            clean = _scrub_tags(full_response).strip()
             self.sig_response_done.emit(clean)
             self._last_response = clean   # for "say it again"
 
@@ -1013,7 +1161,8 @@ class CompanionManager(QObject):
                 pass
 
         except Exception as e:
-            self.sig_error.emit(str(e))
+            _log.exception("query failed")
+            self.sig_error.emit(_describe_error(e))
 
         finally:
             if pointing_held:
