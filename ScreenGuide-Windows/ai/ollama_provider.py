@@ -62,7 +62,15 @@ class OllamaProvider(BaseLLMProvider):
             "options": {"num_predict": 1024},
         }
 
-        async with httpx.AsyncClient(timeout=120) as client:
+        # A local model on CPU can take many minutes to produce its first
+        # token, and every extra screenshot adds to that. The old flat 120s
+        # cap fired mid-prefill and surfaced as httpx.ReadTimeout — whose
+        # str() is empty, so the UI showed a blank error bubble. Connect
+        # stays short (the daemon is either up or it isn't); reading gets a
+        # generous ceiling, and Esc/Stop still cancels at any point.
+        timeout = httpx.Timeout(connect=10.0, read=cfg.ollama_timeout_s,
+                                write=60.0, pool=10.0)
+        async with httpx.AsyncClient(timeout=timeout) as client:
             async with client.stream(
                 "POST",
                 f"{self._base}/api/chat",
