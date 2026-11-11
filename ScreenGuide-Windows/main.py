@@ -258,6 +258,27 @@ def main():
         win.activateWindow()
     tray.on_journal_browse.connect(_browse_journal)
 
+    # Settings window — model choice, screen-capture cadence and retention.
+    def _open_settings():
+        from ui.settings import SettingsWindow
+        win = _settings_keepalive[0]
+        if win is None:
+            win = SettingsWindow(manager=manager)
+            # A provider or model switch has to reach the panel's badge and
+            # model dropdown, which read config at build time.
+            win.on_provider_changed.connect(panel.refresh_for_provider)
+            win.on_provider_changed.connect(lambda _n: tray.rebuild_menu())
+            win.on_models_changed.connect(
+                lambda: panel.refresh_for_provider(cfg.llm_provider())
+            )
+            _settings_keepalive[0] = win
+        else:
+            win._load_installed_models()
+        win.show()
+        win.raise_()
+        win.activateWindow()
+    tray.on_open_settings.connect(_open_settings)
+
     # Attach document (drag-drop alternative — file picker)
     def _attach_doc():
         from PyQt6.QtWidgets import QFileDialog
@@ -429,6 +450,7 @@ def main():
 # GC these otherwise and the windows will vanish).
 _setup_keepalive: list = [None]
 _history_keepalive: list = [None]
+_settings_keepalive: list = [None]
 
 
 if __name__ == "__main__":

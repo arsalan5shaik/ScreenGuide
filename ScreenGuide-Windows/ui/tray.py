@@ -52,6 +52,7 @@ class TrayManager(QObject):
     on_workflow_stop      = pyqtSignal()
     on_journal_open       = pyqtSignal()
     on_journal_browse     = pyqtSignal()
+    on_open_settings      = pyqtSignal()
     on_attach_doc         = pyqtSignal()
     on_run_setup          = pyqtSignal()
     on_diagnostics        = pyqtSignal()
@@ -123,6 +124,9 @@ class TrayManager(QObject):
 
         stop_action = menu.addAction("Stop (Esc)")
         stop_action.triggered.connect(self.on_stop)
+
+        settings_action = menu.addAction("Settings…")
+        settings_action.triggered.connect(self.on_open_settings)
 
         menu.addSeparator()
 
