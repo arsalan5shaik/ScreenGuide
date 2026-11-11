@@ -22,6 +22,7 @@ from config import cfg
 from ai.base_provider import BaseLLMProvider, Message
 from audio.ambient_listener import AmbientListener
 from screen.capture import capture_all_screens
+from screen import selection
 from ui.panel import AppState
 from tutor import (
     active_window_title, app_key,
@@ -506,7 +507,21 @@ class CompanionManager(QObject):
             self._emit_state(AppState.IDLE)
 
     def _submit(self, coro):
+        # The loop lives on a thread started in __init__, so very early calls
+        # can arrive before it exists. Dropping the coroutine here silently
+        # discarded the work and left the UI waiting on a reply that was
+        # never going to come — wait briefly for the loop instead.
         if not self._loop:
+            deadline = time.monotonic() + 2.0
+            while not self._loop and time.monotonic() < deadline:
+                time.sleep(0.01)
+        if not self._loop:
+            _log.error("event loop unavailable — dropping queued work")
+            coro.close()
+            self.sig_error.emit(
+                "ScreenGuide is still starting up. Try that again in a moment."
+            )
+            self._emit_state(AppState.IDLE)
             return
         fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
 
@@ -762,7 +777,11 @@ class CompanionManager(QObject):
             self._emit_state(AppState.IDLE)
             return
 
-        await self._process_query(transcript)
+        # Grab the selection now, not at hotkey-press: the modifiers are
+        # released by this point, so the synthetic Ctrl+C in the clipboard
+        # tier can't combine with a held Win key. Focus is still in the
+        # user's app because the panel never activates itself.
+        await self._process_query(transcript, read_selection=True)
 
     def submit_text(self, text: str):
         """Handle a typed question from the panel composer.
@@ -776,8 +795,13 @@ class CompanionManager(QObject):
         self._emit_state(AppState.THINKING)
         self._submit(self._process_query(text))
 
-    async def _process_query(self, transcript: str):
-        """Shared path for spoken and typed questions."""
+    async def _process_query(self, transcript: str, read_selection: bool = False):
+        """Shared path for spoken and typed questions.
+
+        `read_selection` is only set for voice: a typed question is being
+        composed in our own panel, so the focused control is that text box and
+        there is no user selection to read from the app behind it.
+        """
         self.sig_transcript.emit(transcript)
         pointing_held = False  # track whether we told overlay to hold dwell
 
@@ -1018,6 +1042,29 @@ class CompanionManager(QObject):
                 except Exception:
                     pass
 
+            # Highlighted text — the subject of the question when the user
+            # has selected something and asks "what does this mean?".
+            # Skipped under the privacy guard: if the window was too sensitive
+            # to screenshot, its selected text is too sensitive to read.
+            sel_extra = ""
+            if read_selection and cfg.selection_context_enabled and not sensitive:
+                try:
+                    sel = await asyncio.to_thread(
+                        selection.get_selection,
+                        cfg.selection_use_clipboard,
+                    )
+                except Exception:
+                    sel = None
+                if sel:
+                    sel_extra = selection.format_for_prompt(sel)
+                    _log.info("selection captured via %s (%d chars)",
+                              sel.source, len(sel.text))
+                    preview = " ".join(sel.text.split())[:60]
+                    self.sig_notice.emit(
+                        f"Using highlighted text: “{preview}"
+                        f"{'…' if len(sel.text) > 60 else ''}”"
+                    )
+
             # Attached documents (drag-dropped PDFs etc.)
             doc_extra = ""
             for fname, text in self._attached_docs:
@@ -1032,7 +1079,7 @@ class CompanionManager(QObject):
                 detected_coord=detected_coord,
                 code_active=code_active,
                 language_code=lang_code,
-                extra=ocr_extra + doc_extra + fig_extra + history_note,
+                extra=sel_extra + ocr_extra + doc_extra + fig_extra + history_note,
             )
             if sensitive:
                 system += (
