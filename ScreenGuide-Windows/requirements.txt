@@ -27,7 +27,7 @@ faster-whisper>=1.0.0
 # pywhispercpp>=1.2.0
 
 # TTS - free
-edge-tts>=6.1.10
+edge-tts>=7.3.1
 
 # TTS - premium (optional)
 elevenlabs>=1.0.0
